@@ -3,8 +3,10 @@ package com.rachitratnammudaliar.kitchtally.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.Build
 import android.util.LruCache
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
@@ -29,16 +31,47 @@ object PhotoStore {
 
     /** Copies and shrinks a picked or captured image. Returns the stored file name. */
     fun save(context: Context, uri: Uri): String {
+        val bitmap = decode(context, uri) ?: throw IllegalArgumentException("Not an image this phone can read")
+        val name = "${UUID.randomUUID()}.jpg"
+        val out = File(dir(context), name)
+        try {
+            out.outputStream().use { if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it)) throw IllegalStateException("Couldn't save the image") }
+        } catch (e: Exception) {
+            out.delete()
+            throw e
+        }
+        return name
+    }
+
+    /** Reads JPEG, PNG, WebP, HEIC, AVIF and GIF, upright and no bigger than [MAX_SIZE]. */
+    private fun decode(context: Context, uri: Uri): Bitmap? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val viaDecoder = runCatching {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { decoder, info, _ ->
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    val w = info.size.width
+                    val h = info.size.height
+                    val scale = minOf(1f, MAX_SIZE.toFloat() / maxOf(w, h))
+                    if (scale < 1f) decoder.setTargetSize(maxOf(1, (w * scale).toInt()), maxOf(1, (h * scale).toInt()))
+                }
+            }.getOrNull()
+            // ImageDecoder already turns photos the right way up.
+            if (viaDecoder != null) return viaDecoder
+        }
+        return decodeOld(context, uri)
+    }
+
+    internal fun decodeOld(context: Context, uri: Uri): Bitmap? {
         val resolver = context.contentResolver
+        // Reading only the size always returns null, so the size comes from the options.
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: throw IllegalArgumentException("Couldn't open the image")
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IllegalArgumentException("Not an image")
+        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= MAX_SIZE || bounds.outHeight / (sample * 2) >= MAX_SIZE) sample *= 2
         val decoded = resolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
-        } ?: throw IllegalArgumentException("Couldn't read the image")
+        } ?: return null
 
         val rotation = runCatching {
             resolver.openInputStream(uri)?.use {
@@ -52,14 +85,12 @@ object PhotoStore {
         }.getOrDefault(0f)
 
         val scale = minOf(1f, MAX_SIZE.toFloat() / maxOf(decoded.width, decoded.height))
+        if (scale == 1f && rotation == 0f) return decoded
         val matrix = Matrix().apply {
             postScale(scale, scale)
             postRotate(rotation)
         }
-        val bitmap = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        val name = "${UUID.randomUUID()}.jpg"
-        File(dir(context), name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        return name
+        return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
     }
 
     fun delete(context: Context, name: String) {
