@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- **Fixed:** adding a photo on Android always said "That photo couldn't be used". Photos from the gallery, Downloads and the camera now work, including JPEG, PNG, WebP and HEIC
+
 ## 1.2.0
 
 - **New categories:** Vegetables, Fruit, Staples, Sauces & spreads, Dairy & eggs, Meat & protein, Bread & bakery, Spices, Snacks, Drinks, Personal care, Household and Other. Old ones are renamed automatically (Grains & flour → Staples, Fruit & veg → Vegetables, Toiletries → Personal care, Cleaning → Household)
