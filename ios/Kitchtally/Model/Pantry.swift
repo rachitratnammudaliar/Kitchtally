@@ -92,14 +92,18 @@ struct Entry {
 
 enum Categories {
     static let presets = [
-        "Groceries", "Fruit & veg", "Bread & bakery", "Dairy & eggs", "Grains & flour",
-        "Spices", "Snacks", "Drinks", "Toiletries", "Cleaning", "Other",
+        "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
+        "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
     ]
 
+    /// Names used before version 1.2, and what they're called now.
+    static let renamed = ["Fruit & veg": "Vegetables", "Grains & flour": "Staples", "Toiletries": "Personal care", "Cleaning": "Household"]
+
     private static let emoji: [String: String] = [
-        "groceries": "🛒", "fruit & veg": "🥕", "bread & bakery": "🍞", "dairy & eggs": "🥛",
-        "grains & flour": "🌾", "spices": "🌶️", "snacks": "🍪", "drinks": "🥤",
-        "toiletries": "🧴", "cleaning": "🧽", "other": "📦",
+        "vegetables": "🥬", "fruit": "🍎", "staples": "🌾", "sauces & spreads": "🥫",
+        "dairy & eggs": "🥛", "meat & protein": "🍗", "bread & bakery": "🍞", "spices": "🌶️",
+        "snacks": "🍪", "drinks": "🥤", "personal care": "🧴", "household": "🧻", "other": "📦",
+        "groceries": "🛒",
     ]
 
     static func emojiFor(_ category: String) -> String {
@@ -115,6 +119,58 @@ enum Categories {
             if seen.insert(c.lowercased()).inserted { custom.append(c) }
         }
         return presets.filter { lowered.contains($0.lowercased()) } + custom.sorted { $0.lowercased() < $1.lowercased() }
+    }
+}
+
+/// What a new item probably is, from its name. The rules are the same as the Android app's.
+struct Suggestion: Equatable {
+    let category: String
+    let unit: QtyUnit
+    let life: Life
+    var packSize: Double = 0
+}
+
+enum Suggestions {
+    // Checked in order, so more specific names come first.
+    private static let rules: [([String], Suggestion)] = [
+        (["ice cream"], Suggestion(category: "Snacks", unit: .PACKET, life: .MEDIUM, packSize: 0)),
+        (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0)),
+        (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach", "sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .BOTTLE, life: .LONG, packSize: 0)),
+        (["body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "toothbrush", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "razor", "shaving", "lip balm", "hair oil", "hair gel", "sanitary", "pads", "cotton"], Suggestion(category: "Personal care", unit: .PIECE, life: .LONG, packSize: 0)),
+        (["sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto"], Suggestion(category: "Sauces & spreads", unit: .BOTTLE, life: .LONG, packSize: 0)),
+        (["veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint"], Suggestion(category: "Vegetables", unit: .PACKET, life: .SHORT, packSize: 0)),
+        (["onion", "potato", "garlic", "ginger", "pumpkin"], Suggestion(category: "Vegetables", unit: .KG, life: .MEDIUM, packSize: 0)),
+        (["carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili"], Suggestion(category: "Vegetables", unit: .KG, life: .SHORT, packSize: 0)),
+        (["apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach"], Suggestion(category: "Fruit", unit: .PIECE, life: .SHORT, packSize: 0)),
+        (["egg"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .MEDIUM, packSize: 10.0)),
+        (["milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly"], Suggestion(category: "Dairy & eggs", unit: .BOTTLE, life: .SHORT, packSize: 0)),
+        (["yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .SHORT, packSize: 0)),
+        (["cheese", "butter", "ghee", "paneer", "cream"], Suggestion(category: "Dairy & eggs", unit: .PACKET, life: .MEDIUM, packSize: 0)),
+        (["chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince"], Suggestion(category: "Meat & protein", unit: .PACKET, life: .SHORT, packSize: 0)),
+        (["bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav"], Suggestion(category: "Bread & bakery", unit: .PACKET, life: .SHORT, packSize: 0)),
+        (["masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing"], Suggestion(category: "Spices", unit: .PACKET, life: .LONG, packSize: 0)),
+        (["rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa"], Suggestion(category: "Staples", unit: .KG, life: .LONG, packSize: 0)),
+        (["oil"], Suggestion(category: "Staples", unit: .BOTTLE, life: .LONG, packSize: 0)),
+        (["pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "oats", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "salt", "sugar", "cereal", "cornflakes", "muesli", "vermicelli"], Suggestion(category: "Staples", unit: .PACKET, life: .LONG, packSize: 0)),
+        (["coffee", "tea", "chai"], Suggestion(category: "Drinks", unit: .PACKET, life: .LONG, packSize: 0)),
+        (["juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi"], Suggestion(category: "Drinks", unit: .BOTTLE, life: .MEDIUM, packSize: 0)),
+        (["chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake"], Suggestion(category: "Snacks", unit: .PACKET, life: .LONG, packSize: 0)),
+    ]
+
+    /// True if [keyword] starts a word in [text]: "egg" matches "Eggs" but "peas" doesn't match "chickpeas".
+    private static func startsWord(_ text: String, _ keyword: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: keyword, range: searchStart..<text.endIndex) {
+            if range.lowerBound == text.startIndex || !text[text.index(before: range.lowerBound)].isLetter { return true }
+            searchStart = text.index(after: range.lowerBound)
+        }
+        return false
+    }
+
+    static func forName(_ name: String) -> Suggestion? {
+        let n = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !n.isEmpty else { return nil }
+        return rules.first { keys, _ in keys.contains { startsWord(n, $0) } }?.1
     }
 }
 

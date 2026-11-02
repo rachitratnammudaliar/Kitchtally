@@ -68,18 +68,78 @@ data class Entry(
 
 object Categories {
     val presets = listOf(
-        "Groceries", "Fruit & veg", "Bread & bakery", "Dairy & eggs", "Grains & flour",
-        "Spices", "Snacks", "Drinks", "Toiletries", "Cleaning", "Other",
+        "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
+        "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
+    )
+
+    /** Names used before version 1.2, and what they're called now. */
+    val renamed = mapOf(
+        "Fruit & veg" to "Vegetables",
+        "Grains & flour" to "Staples",
+        "Toiletries" to "Personal care",
+        "Cleaning" to "Household",
     )
 
     private val emoji = mapOf(
-        "groceries" to "🛒", "fruit & veg" to "🥕", "bread & bakery" to "🍞", "dairy & eggs" to "🥛",
-        "grains & flour" to "🌾", "spices" to "🌶️", "snacks" to "🍪", "drinks" to "🥤",
-        "toiletries" to "🧴", "cleaning" to "🧽", "other" to "📦",
+        "vegetables" to "🥬", "fruit" to "🍎", "staples" to "🌾", "sauces & spreads" to "🥫",
+        "dairy & eggs" to "🥛", "meat & protein" to "🍗", "bread & bakery" to "🍞", "spices" to "🌶️",
+        "snacks" to "🍪", "drinks" to "🥤", "personal care" to "🧴", "household" to "🧻", "other" to "📦",
+        "groceries" to "🛒",
     )
 
     /** A picture for the category; the user's own categories get a jar. */
     fun emojiFor(category: String): String = emoji[category.trim().lowercase()] ?: "🫙"
+}
+
+/** What a new item probably is, from its name: category, how it's counted, how long it lasts. */
+data class Suggestion(val category: String, val unit: QtyUnit, val life: Life, val packSize: Double = 0.0)
+
+object Suggestions {
+    private fun s(category: String, unit: QtyUnit, life: Life, packSize: Double = 0.0) = Suggestion(category, unit, life, packSize)
+
+    // Checked in order, so more specific names come first: "garlic sauce" is a sauce,
+    // "eggplant" a vegetable, "hair oil" personal care, "peanut butter" a spread.
+    private val rules: List<Pair<List<String>, Suggestion>> = listOf(
+        listOf("ice cream") to s("Snacks", QtyUnit.PACKET, Life.MEDIUM),
+        listOf("toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin") to s("Household", QtyUnit.PACKET, Life.LONG),
+        listOf("dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach", "sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper") to s("Household", QtyUnit.BOTTLE, Life.LONG),
+        listOf("body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "toothbrush", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "razor", "shaving", "lip balm", "hair oil", "hair gel", "sanitary", "pads", "cotton") to s("Personal care", QtyUnit.PIECE, Life.LONG),
+        listOf("sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto") to s("Sauces & spreads", QtyUnit.BOTTLE, Life.LONG),
+        listOf("veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint") to s("Vegetables", QtyUnit.PACKET, Life.SHORT),
+        listOf("onion", "potato", "garlic", "ginger", "pumpkin") to s("Vegetables", QtyUnit.KG, Life.MEDIUM),
+        listOf("carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili") to s("Vegetables", QtyUnit.KG, Life.SHORT),
+        listOf("apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach") to s("Fruit", QtyUnit.PIECE, Life.SHORT),
+        listOf("egg") to s("Dairy & eggs", QtyUnit.PIECE, Life.MEDIUM, 10.0),
+        listOf("milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly") to s("Dairy & eggs", QtyUnit.BOTTLE, Life.SHORT),
+        listOf("yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr") to s("Dairy & eggs", QtyUnit.PIECE, Life.SHORT),
+        listOf("cheese", "butter", "ghee", "paneer", "cream") to s("Dairy & eggs", QtyUnit.PACKET, Life.MEDIUM),
+        listOf("chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince") to s("Meat & protein", QtyUnit.PACKET, Life.SHORT),
+        listOf("bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav") to s("Bread & bakery", QtyUnit.PACKET, Life.SHORT),
+        listOf("masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing") to s("Spices", QtyUnit.PACKET, Life.LONG),
+        listOf("rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa") to s("Staples", QtyUnit.KG, Life.LONG),
+        listOf("oil") to s("Staples", QtyUnit.BOTTLE, Life.LONG),
+        listOf("pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "oats", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "salt", "sugar", "cereal", "cornflakes", "muesli", "vermicelli") to s("Staples", QtyUnit.PACKET, Life.LONG),
+        listOf("coffee", "tea", "chai") to s("Drinks", QtyUnit.PACKET, Life.LONG),
+        listOf("juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi") to s("Drinks", QtyUnit.BOTTLE, Life.MEDIUM),
+        listOf("chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake") to s("Snacks", QtyUnit.PACKET, Life.LONG),
+    )
+
+    /** True if [keyword] starts a word in [text]: "egg" matches "Eggs" but "peas" doesn't match "chickpeas". */
+    private fun startsWord(text: String, keyword: String): Boolean {
+        var from = 0
+        while (true) {
+            val i = text.indexOf(keyword, from)
+            if (i < 0) return false
+            if (i == 0 || !text[i - 1].isLetter()) return true
+            from = i + 1
+        }
+    }
+
+    fun forName(name: String): Suggestion? {
+        val n = name.trim().lowercase()
+        if (n.isEmpty()) return null
+        return rules.firstOrNull { (keys, _) -> keys.any { startsWord(n, it) } }?.second
+    }
 }
 
 object Shops {

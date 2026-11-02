@@ -316,15 +316,15 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 ev(b, 12, 2.0, 178, "IKI"), ev(u, 11), ev(u, 9), ev(b, 7, 2.0, 178, "IKI"), ev(u, 6), ev(s, 4), ev(b, 3, 2.0, 178, "Norfa"), ev(u, 1), ev(b, 0, 2.0, 178, "IKI"), ev(u, 0), ev(s, 0))
             add("Milk", "Dairy & eggs", QtyUnit.BOTTLE, Life.SHORT,
                 ev(b, 9, 2.0, 198, "Maxima"), ev(u, 7), ev(u, 3), ev(b, 2, 1.0, 99, "IKI"), ev(u, 1), ev(b, 0, 2.0, 198, "IKI"), ev(u, 0))
-            add("Basmati rice", "Grains & flour", QtyUnit.KG, Life.LONG,
+            add("Basmati rice", "Staples", QtyUnit.KG, Life.LONG,
                 ev(b, 20, 5.0, 1245, "Maxima"), ev(u, 15, 0.5), ev(u, 10, 0.5), ev(s, 4, 1.0), ev(u, 2, 0.5))
-            add("Atta (wheat flour)", "Grains & flour", QtyUnit.KG, Life.LONG,
+            add("Atta", "Staples", QtyUnit.KG, Life.LONG,
                 ev(b, 25, 5.0, 899, "Lidl"), ev(u, 18), ev(u, 9), ev(s, 4))
-            add("Tomatoes", "Fruit & veg", QtyUnit.KG, Life.SHORT,
+            add("Tomatoes", "Vegetables", QtyUnit.KG, Life.SHORT,
                 ev(b, 6, 1.0, 249, "Lidl"), ev(u, 4, 0.5), ev(s, 2, 0.5), ev(b, 0, 1.0, 239, "Lidl"), ev(s, 0, 0.5))
-            add("Onions", "Fruit & veg", QtyUnit.KG, Life.MEDIUM,
+            add("Red onion", "Vegetables", QtyUnit.KG, Life.MEDIUM,
                 ev(b, 14, 2.0, 138, "Norfa"), ev(u, 10, 0.5), ev(u, 6, 0.5), ev(u, 2, 0.5))
-            add("Spaghetti", "Groceries", QtyUnit.PACKET, Life.LONG,
+            add("Spaghetti", "Staples", QtyUnit.PACKET, Life.LONG,
                 ev(b, 16, 3.0, 237, "Rimi"), ev(u, 12), ev(s, 5))
             db.withTransaction {
                 dao.insertItemWithEvents(
@@ -332,11 +332,11 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                     listOf(ev(b, 5, 10.0, 289, "IKI"), ev(u, 3, 2.0), ev(s, 1, 2.0)),
                 )
             }
-            add("Toothpaste", "Toiletries", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
-            add("Dish soap", "Cleaning", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
+            add("Body wash", "Personal care", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
+            add("Dishwashing liquid", "Household", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
             db.withTransaction {
                 dao.insertItemWithEvents(
-                    Item(name = "Instant noodles", category = "Snacks", unit = QtyUnit.PACKET.name, life = Life.LONG.name, unsure = true),
+                    Item(name = "Instant noodles", category = "Staples", unit = QtyUnit.PACKET.name, life = Life.LONG.name, unsure = true),
                     listOf(ev(b, 20, 5.0, 295, "Maxima"), ev(u, 15, 2.0), ev(u, 8, 2.0), ev(u, 3)),
                 )
             }

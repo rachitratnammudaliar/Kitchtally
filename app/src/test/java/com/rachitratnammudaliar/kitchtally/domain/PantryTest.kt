@@ -138,6 +138,31 @@ class PantryTest {
     }
 
     @Test
+    fun namesSuggestCategories() {
+        val expected = mapOf(
+            "Eggs" to "Dairy & eggs", "Veggie mix" to "Vegetables", "Pasta/spagheti" to "Staples", "Chicken" to "Meat & protein",
+            "Bread" to "Bread & bakery", "Milk /Substitute" to "Dairy & eggs", "Red Onion" to "Vegetables", "Potato" to "Vegetables",
+            "Carrot" to "Vegetables", "Chole" to "Staples", "Dishwashing liquid" to "Household", "Tomato Puree" to "Sauces & spreads",
+            "Mushroom" to "Vegetables", "Garlic Sauce" to "Sauces & spreads", "Clever Yogurt" to "Dairy & eggs", "Cheese" to "Dairy & eggs",
+            "Rice" to "Staples", "Oil" to "Staples", "Butter" to "Dairy & eggs", "Salt" to "Staples", "Sugar" to "Staples",
+            "Spices" to "Spices", "Atta" to "Staples", "Body wash" to "Personal care", "Toilet paper" to "Household",
+            "Toothpaste" to "Personal care", "Face wash" to "Personal care", "Body cream" to "Personal care", "Face cream" to "Personal care",
+            "Peanut butter" to "Sauces & spreads", "Eggplant" to "Vegetables", "Chickpeas" to "Staples", "Hair oil" to "Personal care",
+            "Ice cream" to "Snacks", "Apples" to "Fruit",
+        )
+        expected.forEach { (name, category) -> assertEquals(name, category, Suggestions.forName(name)?.category) }
+        val eggs = Suggestions.forName("Eggs")!!
+        assertEquals(QtyUnit.PIECE, eggs.unit)
+        assertEquals(10.0, eggs.packSize, 0.0)
+        assertEquals(Life.SHORT, Suggestions.forName("Bread")!!.life)
+        assertEquals(QtyUnit.KG, Suggestions.forName("Rice")!!.unit)
+        assertNull(Suggestions.forName("Birthday candles"))
+        assertNull(Suggestions.forName(" "))
+        assertEquals("🥬", Categories.emojiFor("Vegetables"))
+        assertEquals("Staples", Categories.renamed["Grains & flour"])
+    }
+
+    @Test
     fun shopOptionsKeepPresetsFirstWithoutDuplicates() {
         assertEquals(listOf("IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco", "Aibė"), Shops.options(listOf("iki", "Aibė", " ", "Aibė")))
     }

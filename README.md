@@ -72,7 +72,7 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - Used and shared per item: "Bread: used 3 packets (1 shared), bought 2"
 - Go back to any earlier week
 
-**Categories:** Groceries, Fruit & veg, Bread & bakery, Dairy & eggs, Grains & flour, Spices, Snacks, Drinks, Toiletries, Cleaning, Other, or your own.
+**Categories:** 🥬 Vegetables, 🍎 Fruit, 🌾 Staples, 🥫 Sauces & spreads, 🥛 Dairy & eggs, 🍗 Meat & protein, 🍞 Bread & bakery, 🌶️ Spices, 🍪 Snacks, 🥤 Drinks, 🧴 Personal care, 🧻 Household, 📦 Other, or your own. Type a name and Kitchtally picks the category, unit and how long it lasts: "Eggs" becomes Dairy & eggs, pieces, packs of 10.
 
 **Backup:** export to a file and import it on a new phone, Android or iPhone. Photos stay on the phone.
 

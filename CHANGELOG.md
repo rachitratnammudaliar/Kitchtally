@@ -2,6 +2,8 @@
 
 ## 1.2.0
 
+- **New categories:** Vegetables, Fruit, Staples, Sauces & spreads, Dairy & eggs, Meat & protein, Bread & bakery, Spices, Snacks, Drinks, Personal care, Household and Other. Old ones are renamed automatically (Grains & flour → Staples, Fruit & veg → Vegetables, Toiletries → Personal care, Cleaning → Household)
+- **Fills itself in:** type "Eggs" and it picks Dairy & eggs, counted in pieces, packs of 10; "Garlic sauce" goes to Sauces & spreads, "Face cream" to Personal care, and so on. Change anything you like
 - **Not sure to buy again:** one tap on an item (or Not now → Not sure to buy again on the shopping list) keeps it off the shopping list, even when it runs out. These items have their own group at the bottom of the pantry until you switch it off
 
 ## 1.1.0

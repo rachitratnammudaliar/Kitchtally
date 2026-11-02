@@ -18,12 +18,26 @@ struct EditItemView: View {
     @State private var notes: String
     @State private var photo: String
     @State private var showErrors = false
+    // A new item fills in from its name until you choose these yourself.
+    @State private var categoryTouched = false
+    @State private var unitTouched = false
+    @State private var lifeTouched = false
+    @State private var packTouched = false
     private let originalPhoto: String
+
+    private func applySuggestion() {
+        guard existing == nil else { return }
+        let guess = Suggestions.forName(name)
+        if !categoryTouched { category = guess?.category ?? "Other" }
+        if !unitTouched { unit = guess?.unit ?? .PACKET }
+        if !lifeTouched { life = guess?.life ?? .MEDIUM }
+        if !packTouched { packText = (guess?.packSize ?? 0) > 0 ? Qty.format(guess!.packSize) : "" }
+    }
 
     init(existing: Item?) {
         self.existing = existing
         _name = State(initialValue: existing?.name ?? "")
-        _category = State(initialValue: existing?.category ?? "Groceries")
+        _category = State(initialValue: existing?.category ?? "Other")
         _unit = State(initialValue: existing?.unitValue ?? .PACKET)
         _life = State(initialValue: existing?.lifeValue ?? .MEDIUM)
         _lowAt = State(initialValue: Qty.format(existing?.lowAt ?? 1))
@@ -103,23 +117,24 @@ struct EditItemView: View {
                         })
                     }
                     TextField("Name, e.g. Basmati rice", text: $name)
+                        .onChange(of: name) { _ in applySuggestion() }
                     if showErrors && nameError { Text("Enter a name").font(.caption).foregroundColor(.red) }
                     if duplicate { Text("You already have an item called this. You can still save it.").font(.caption).foregroundColor(.orange) }
                 }
 
                 Section("Category") {
-                    NamedChoice(options: uniqueCategories, selected: $category, otherLabel: "Category name")
+                    NamedChoice(options: uniqueCategories, selected: Binding(get: { category }, set: { category = $0; categoryTouched = true }), otherLabel: "Category name")
                     if showErrors && category.isEmpty { Text("Choose or type a category").font(.caption).foregroundColor(.red) }
                 }
 
                 Section("Counted in") {
-                    Picker("Unit", selection: $unit) {
+                    Picker("Unit", selection: Binding(get: { unit }, set: { unit = $0; unitTouched = true })) {
                         ForEach(QtyUnit.allCases) { Text($0.plural.capitalized).tag($0) }
                     }
                 }
 
                 Section {
-                    Picker("Lasts", selection: $life) {
+                    Picker("Lasts", selection: Binding(get: { life }, set: { life = $0; lifeTouched = true })) {
                         ForEach(Life.allCases) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -151,7 +166,7 @@ struct EditItemView: View {
                     HStack {
                         Text("Comes in packs of")
                         Spacer()
-                        TextField("optional", text: $packText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
+                        TextField("optional", text: Binding(get: { packText }, set: { packText = $0; packTouched = true })).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                         Text(unit.plural).foregroundColor(.secondary)
                     }
                     if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil) {

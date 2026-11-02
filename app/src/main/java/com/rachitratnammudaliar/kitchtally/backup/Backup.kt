@@ -3,6 +3,7 @@ package com.rachitratnammudaliar.kitchtally.backup
 import com.rachitratnammudaliar.kitchtally.data.Event
 import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
+import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
@@ -90,7 +91,7 @@ object Backup {
             items += Item(
                 id = o.optLong("ref"),
                 name = name.take(60),
-                category = o.optString("category", "Groceries").trim().ifBlank { "Groceries" }.take(40),
+                category = o.optString("category", "Other").trim().ifBlank { "Other" }.let { Categories.renamed[it] ?: it }.take(40),
                 unit = unit.name,
                 life = Life.fromName(o.optString("life")).name,
                 lowAt = lowAt,

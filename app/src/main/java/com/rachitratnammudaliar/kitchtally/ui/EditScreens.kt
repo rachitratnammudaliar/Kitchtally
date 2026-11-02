@@ -59,6 +59,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
 import com.rachitratnammudaliar.kitchtally.domain.Shops
+import com.rachitratnammudaliar.kitchtally.domain.Suggestions
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
@@ -148,7 +149,12 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
 
     var loaded by rememberSaveable { mutableStateOf(isNew) }
     var name by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("Groceries") }
+    var category by rememberSaveable { mutableStateOf("Other") }
+    // A new item fills in from its name until you choose these yourself.
+    var categoryTouched by rememberSaveable { mutableStateOf(!isNew) }
+    var unitTouched by rememberSaveable { mutableStateOf(!isNew) }
+    var lifeTouched by rememberSaveable { mutableStateOf(!isNew) }
+    var packTouched by rememberSaveable { mutableStateOf(!isNew) }
     var unit by rememberSaveable { mutableStateOf(QtyUnit.PACKET.name) }
     var life by rememberSaveable { mutableStateOf(Life.MEDIUM.name) }
     var lowAt by rememberSaveable { mutableStateOf("1") }
@@ -258,7 +264,16 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             }
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it.take(60) },
+                onValueChange = { input ->
+                    name = input.take(60)
+                    if (isNew) {
+                        val guess = Suggestions.forName(name)
+                        if (!categoryTouched) category = guess?.category ?: "Other"
+                        if (!unitTouched) unit = (guess?.unit ?: QtyUnit.PACKET).name
+                        if (!lifeTouched) life = (guess?.life ?: Life.MEDIUM).name
+                        if (!packTouched) packText = guess?.packSize?.takeIf { it > 0 }?.let { Qty.format(it) } ?: ""
+                    }
+                },
                 label = { Text("Name") },
                 placeholder = { Text("Basmati rice") },
                 singleLine = true,
@@ -276,17 +291,17 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             NamedChoice(
                 options = (Categories.presets + (state?.usedCategories ?: emptyList())).distinctBy { it.lowercase() },
                 selected = category,
-                onSelect = { category = it },
+                onSelect = { category = it; categoryTouched = true },
                 otherLabel = "Category name",
                 maxLength = 40,
             )
             if (showErrors && category.isBlank()) Hint("Choose or type a category", error = true)
 
             SectionLabel("Counted in")
-            ChipRow(QtyUnit.entries, QtyUnit.fromName(unit), { it.plural.replaceFirstChar { c -> c.uppercase() } }, { unit = it.name })
+            ChipRow(QtyUnit.entries, QtyUnit.fromName(unit), { it.plural.replaceFirstChar { c -> c.uppercase() } }, { unit = it.name; unitTouched = true })
 
             SectionLabel("How long it lasts")
-            ChipRow(Life.entries, Life.fromName(life), { it.label }, { life = it.name })
+            ChipRow(Life.entries, Life.fromName(life), { it.label }, { life = it.name; lifeTouched = true })
             Hint(Life.fromName(life).description)
 
             val unitValue = QtyUnit.fromName(unit)
@@ -321,7 +336,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             Hint("For example 0.5 kg of rice per meal, or 1 packet of bread. Leave it empty for ${unitValue.label(Pantry.defaultStep(unitValue))}.")
             NumberField(
                 value = packText,
-                onChange = { packText = it },
+                onChange = { packText = it; packTouched = true },
                 label = "Comes in packs of (optional)",
                 placeholder = "e.g. 10",
                 isError = showErrors && packValue == null,

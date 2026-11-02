@@ -116,8 +116,28 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(QtyUnit.KG.label(0.5), "0.5 kg")
         XCTAssertEqual(Shops.options(["iki", "Aibė", " ", "Aibė"]), ["IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco", "Aibė"])
         XCTAssertEqual(Categories.emojiFor("Bread & bakery"), "🍞")
-        XCTAssertEqual(Categories.ordered(["Snacks", "Groceries", "My stuff", "groceries"]), ["Groceries", "Snacks", "My stuff"])
+        XCTAssertEqual(Categories.ordered(["Snacks", "Vegetables", "My stuff", "vegetables"]), ["Vegetables", "Snacks", "My stuff"])
         XCTAssertEqual(Badges.javaHash("hello"), 99162322)
+    }
+
+    func testNamesSuggestCategories() {
+        let expected: [String: String] = [
+            "Eggs": "Dairy & eggs", "Veggie mix": "Vegetables", "Pasta/spagheti": "Staples", "Chicken": "Meat & protein",
+            "Bread": "Bread & bakery", "Milk /Substitute": "Dairy & eggs", "Red Onion": "Vegetables", "Potato": "Vegetables",
+            "Carrot": "Vegetables", "Chole": "Staples", "Dishwashing liquid": "Household", "Tomato Puree": "Sauces & spreads",
+            "Mushroom": "Vegetables", "Garlic Sauce": "Sauces & spreads", "Clever Yogurt": "Dairy & eggs", "Cheese": "Dairy & eggs",
+            "Rice": "Staples", "Oil": "Staples", "Butter": "Dairy & eggs", "Salt": "Staples", "Sugar": "Staples",
+            "Spices": "Spices", "Atta": "Staples", "Body wash": "Personal care", "Toilet paper": "Household",
+            "Toothpaste": "Personal care", "Face wash": "Personal care", "Body cream": "Personal care", "Face cream": "Personal care",
+            "Peanut butter": "Sauces & spreads", "Eggplant": "Vegetables", "Chickpeas": "Staples", "Hair oil": "Personal care",
+            "Ice cream": "Snacks", "Apples": "Fruit",
+        ]
+        for (name, category) in expected { XCTAssertEqual(Suggestions.forName(name)?.category, category, name) }
+        XCTAssertEqual(Suggestions.forName("Eggs")?.packSize, 10)
+        XCTAssertEqual(Suggestions.forName("Eggs")?.unit, .PIECE)
+        XCTAssertEqual(Suggestions.forName("Bread")?.life, .SHORT)
+        XCTAssertNil(Suggestions.forName("Birthday candles"))
+        XCTAssertEqual(Categories.renamed["Grains & flour"], "Staples")
     }
 
     func testBackupMatchesAndroidFormat() throws {

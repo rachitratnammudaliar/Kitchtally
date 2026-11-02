@@ -52,6 +52,8 @@ class MigrationTest {
                 assertEquals(0.0, items.getValue("Rice").packSize, 0.0)
                 assertEquals(true, items.getValue("Bread").refillNeeded)
                 assertEquals("5 kg bag", items.getValue("Rice").notes)
+                assertEquals("Staples", items.getValue("Rice").category)
+                assertEquals("Bread & bakery", items.getValue("Bread").category)
                 assertEquals(4.5, dao.stockOf(2), 0.0)
                 assertEquals(1245L, dao.events().first { it.type == "BOUGHT" }.priceMinor)
                 dao.insert(ShoppingNote(text = "Candles"))

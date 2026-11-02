@@ -4,7 +4,7 @@ import UIKit
 struct Item: Identifiable, Equatable {
     var id: Int64 = 0
     var name: String
-    var category: String = "Groceries"
+    var category: String = "Other"
     var unit: String = QtyUnit.PACKET.rawValue
     var life: String = Life.MEDIUM.rawValue
     var lowAt: Double = 1
@@ -109,14 +109,15 @@ enum Backup {
             guard !name.isEmpty, let ref = number(o, "ref")?.int64Value else { continue }
             var lowAt = number(o, "lowAt")?.doubleValue ?? 1
             if lowAt.isNaN || lowAt < 0 { lowAt = 1 }
-            let category = string(o, "category", "Groceries").trimmingCharacters(in: .whitespaces)
+            let rawCategory = string(o, "category", "Other").trimmingCharacters(in: .whitespaces)
+            let category = Categories.renamed[rawCategory] ?? rawCategory
             let unit = QtyUnit.from(string(o, "unit"))
             var step = number(o, "step")?.doubleValue ?? Pantry.defaultStep(unit)
             if step.isNaN || step <= 0 { step = Pantry.defaultStep(unit) }
             items.append(Item(
                 id: ref,
                 name: String(name.prefix(60)),
-                category: String((category.isEmpty ? "Groceries" : category).prefix(40)),
+                category: String((category.isEmpty ? "Other" : category).prefix(40)),
                 unit: unit.rawValue,
                 life: Life.from(string(o, "life")).rawValue,
                 lowAt: min(lowAt, 10_000),

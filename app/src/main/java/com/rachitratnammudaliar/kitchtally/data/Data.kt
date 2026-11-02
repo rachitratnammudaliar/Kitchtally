@@ -16,6 +16,7 @@ import androidx.room.Transaction
 import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
@@ -28,7 +29,7 @@ import java.time.LocalDate
 data class Item(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
-    val category: String = "Groceries",
+    val category: String = "Other",
     val unit: String = QtyUnit.PACKET.name,
     val life: String = Life.MEDIUM.name,
     /** Running low at or below this amount. */
@@ -181,10 +182,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-/** Version 2 -> 3 (app 1.1.0 -> 1.2.0): "not sure to buy again". */
+/** Version 2 -> 3 (app 1.1.0 -> 1.2.0): "not sure to buy again", and the new category names. */
 val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE items ADD COLUMN unsure INTEGER NOT NULL DEFAULT 0")
+        // Categories renamed in 1.2.0.
+        Categories.renamed.forEach { (old, new) ->
+            db.execSQL("UPDATE items SET category = ? WHERE category = ?", arrayOf<Any>(new, old))
+        }
     }
 }
 
