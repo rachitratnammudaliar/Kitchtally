@@ -13,13 +13,6 @@ struct ItemView: View {
     @State private var receipt: String?
     @State private var undo: UndoState?
 
-    private func act(_ message: String, _ eventId: Int64) {
-        withAnimation { undo = UndoState(message: message, eventId: eventId) }
-        let current = undo
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-            if undo == current { withAnimation { undo = nil } }
-        }
-    }
 
     var body: some View {
         if let item = store.item(id) {
@@ -57,11 +50,22 @@ struct ItemView: View {
                 }
                 .padding(.vertical, 4)
                 HStack(spacing: 8) {
-                    Button { act("Used 1 \(unit.singular)", store.log(id, .USED)) } label: { Label("Used", systemImage: "minus").frame(maxWidth: .infinity) }
+                    Button {
+                        if let r = store.use(item, shared: false) {
+                            showUndo($undo, "Used \(unit.label(r.1))") { store.deleteEvent(r.0) }
+                        }
+                    } label: { Label("Used", systemImage: "minus").frame(maxWidth: .infinity) }
                         .buttonStyle(.bordered).disabled(stock <= 0)
-                    Button { act("Shared 1 \(unit.singular)", store.log(id, .SHARED)) } label: { Label("Shared", systemImage: "person.2").frame(maxWidth: .infinity) }
+                    Button {
+                        if let r = store.use(item, shared: true) {
+                            showUndo($undo, "Shared \(unit.label(r.1))") { store.deleteEvent(r.0) }
+                        }
+                    } label: { Label("Shared", systemImage: "person.2").frame(maxWidth: .infinity) }
                         .buttonStyle(.bordered).disabled(stock <= 0)
-                    Button { act("Added 1 \(unit.singular)", store.quickBuy(id)) } label: { Label("Bought", systemImage: "plus").frame(maxWidth: .infinity) }
+                    Button {
+                        let buy = store.quickBuy(item)
+                        showUndo($undo, "Added \(unit.label(buy.amount))") { store.undoBuy(buy) }
+                    } label: { Label("Bought", systemImage: "plus").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent)
                 }
                 .labelStyle(.titleAndIcon)
@@ -72,12 +76,20 @@ struct ItemView: View {
                         Text(item.refillNeeded ? "On your shopping list" : "Put it on the shopping list now").font(.caption).foregroundColor(.secondary)
                     }
                 }
+                if item.hiddenFromList {
+                    HStack {
+                        Text("Hidden from the shopping list until you buy it again.").font(.caption).foregroundColor(.secondary)
+                        Spacer()
+                        Button("Show again") { store.setHidden(id, false) }.buttonStyle(.borderless)
+                    }
+                }
             }
 
             Section {
                 InfoRow(label: "Category", value: "\(Categories.emojiFor(item.category)) \(item.category)")
                 InfoRow(label: "Lasts", value: item.lifeValue.label, note: item.lifeValue.description)
                 InfoRow(label: "Running low at", value: unit.label(item.lowAt))
+                InfoRow(label: "Each tap", value: "− uses \(unit.label(item.step))", note: "＋ adds \(unit.label(Pantry.buyAmount(unit, entries)))")
                 if let rate = Pantry.dailyUse(entries, today) {
                     let perWeek = Qty.approx(rate * 7)
                     InfoRow(label: "You use", value: "about \(perWeek) \(perWeek == "1" ? unit.singular : unit.plural) a week")
@@ -159,14 +171,7 @@ struct ItemView: View {
         } message: {
             Text("This removes the item, its photos and its whole history. It can't be undone.")
         }
-        .overlay(alignment: .bottom) {
-            if let u = undo {
-                UndoToast(message: u.message) {
-                    store.deleteEvent(u.eventId)
-                    withAnimation { undo = nil }
-                }
-            }
-        }
+        .undoOverlay($undo)
     }
 }
 

@@ -7,85 +7,134 @@ struct ShoppingView: View {
     @State private var buying: PurchaseTarget?
     @State private var undo: UndoState?
     @State private var path: [Int64] = []
+    @State private var newText = ""
+    @State private var info: String?
+
+    private func add() {
+        let text = newText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        if store.addNote(text) { info = "\(text) is in your pantry, so it's marked as needing a refill." }
+        newText = ""
+    }
 
     var body: some View {
         let list = store.items.filter { store.onShoppingList($0, today) }
-        let sections: [(String, [Item])] = [
-            ("Out", list.filter { store.status($0, today) == .out }),
-            ("Running low", list.filter { store.status($0, today) == .low }),
-            ("Refill needed", list.filter { store.status($0, today) == .ok }),
-        ].filter { !$0.1.isEmpty }
-        let estimate = list.reduce(Int64(0)) { sum, item in
-            sum + (Pantry.lastPriced(store.entries(item.id)).flatMap { Pantry.unitPriceMinor($0) } ?? 0)
-        }
+        let titles = ["Out", "Running low", "Refill needed"]
+        let byTitle: [String: [Item]] = [
+            "Out": list.filter { store.status($0, today) == .out },
+            "Running low": list.filter { store.status($0, today) == .low },
+            "Refill needed": list.filter { store.status($0, today) == .ok },
+        ]
+        let estimate = list.reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id)) ?? 0) }
+        let hidden = store.items.filter { $0.hiddenFromList && store.status($0, today) != .ok }
 
         NavigationStack(path: $path) {
             List {
-                if list.isEmpty {
+                Section {
+                    HStack {
+                        TextField("Add something to buy", text: $newText)
+                            .textInputAutocapitalization(.sentences)
+                            .submitLabel(.done)
+                            .onSubmit(add)
+                        Button(action: add) { Image(systemName: "plus.circle.fill").font(.title2) }
+                            .buttonStyle(.borderless)
+                            .disabled(newText.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .accessibilityLabel("Add")
+                    }
+                    if let info = info { Text(info).font(.caption).foregroundColor(.secondary) }
+                }
+
+                if list.isEmpty && store.notes.isEmpty {
                     VStack(spacing: 10) {
                         Text("🛒").font(.system(size: 44))
                         Text("Nothing to buy").font(.headline)
-                        Text("Items appear here when they run out, run low, or you mark them as needing a refill.")
+                        Text("Pantry items appear here when they run out, run low, or you mark them as needing a refill. You can also type anything above.")
                             .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
                 } else {
-                    Section {
-                        Text("\(list.count) item\(list.count == 1 ? "" : "s")" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : ""))
-                            .font(.subheadline).foregroundColor(.secondary)
-                    }
-                    ForEach(sections.map { $0.0 }, id: \.self) { title in
-                        let items = sections.first { $0.0 == title }?.1 ?? []
-                        Section(title) {
-                            ForEach(items.sorted { $0.name.lowercased() < $1.name.lowercased() }) { item in
-                                row(item)
+                    Text("\(list.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : ""))
+                        .font(.subheadline).foregroundColor(.secondary)
+                }
+
+                if !store.notes.isEmpty {
+                    Section("📝  Also need") {
+                        ForEach(store.notes) { note in
+                            Button {
+                                store.deleteNote(note.id)
+                                showUndo($undo, "Got \(note.text)") { store.restoreNote(note) }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "circle").foregroundColor(.secondary)
+                                    Text(note.text).foregroundColor(.primary)
+                                }
                             }
                         }
                     }
+                }
+
+                ForEach(titles.filter { !(byTitle[$0] ?? []).isEmpty }, id: \.self) { title in
+                    Section(title) {
+                        ForEach((byTitle[title] ?? []).sorted { $0.name.lowercased() < $1.name.lowercased() }) { item in
+                            row(item)
+                        }
+                    }
+                }
+
+                if !hidden.isEmpty {
+                    Text("Hidden until bought: " + hidden.map(\.name).joined(separator: ", ")).font(.caption).foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Shopping list")
             .navigationDestination(for: Int64.self) { id in ItemView(id: id, today: today) }
             .sheet(item: $buying) { target in PurchaseView(target: target, today: today) }
-            .overlay(alignment: .bottom) {
-                if let u = undo {
-                    UndoToast(message: u.message) {
-                        store.deleteEvent(u.eventId)
-                        withAnimation { undo = nil }
-                    }
-                }
-            }
+            .undoOverlay($undo)
         }
     }
 
     private func row(_ item: Item) -> some View {
         let entries = store.entries(item.id)
+        let unit = item.unitValue
+        let expected = Pantry.expectedPriceMinor(unit, entries)
         let last = Pantry.lastPriced(entries)
-        let unitPrice = last.flatMap { Pantry.unitPriceMinor($0) }
-        let line = stockLabel(item, Pantry.stock(entries))
-            + (unitPrice.map { " · \(Money.format($0, store.currency)) \(item.unitValue.priceLabel)" } ?? "")
-            + ((last?.shop.isEmpty == false) ? " at \(last!.shop)" : "")
-        return HStack(spacing: 12) {
+        let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(entries)?.shop ?? "")
+        let status = store.status(item, today)
+        let line = "Usually \(unit.label(Pantry.buyAmount(unit, entries)))"
+            + (expected.map { " · \(Money.format($0, store.currency))" } ?? "")
+            + (shop.isEmpty ? "" : " at \(shop)")
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 44)
-                VStack(alignment: .leading, spacing: 2) {
+                ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 46)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(item.name).font(.headline).lineLimit(1)
+                    StockPill(text: stockLabel(item, Pantry.stock(entries)), status: status)
                     Text(line).font(.caption).foregroundColor(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 4)
             }
             .contentShape(Rectangle())
             .onTapGesture { path.append(item.id) }
-            Button("Details") { buying = PurchaseTarget(itemId: item.id, eventId: 0) }
-                .buttonStyle(.borderless).font(.subheadline)
-            Button("Bought") {
-                let id = store.quickBuy(item.id)
-                withAnimation { undo = UndoState(message: "Bought 1 \(item.unitValue.singular) of \(item.name)", eventId: id) }
-                let current = undo
-                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { if undo == current { withAnimation { undo = nil } } }
+            HStack {
+                Spacer()
+                Button("Not now") {
+                    if item.refillNeeded && status == .ok {
+                        store.setRefillNeeded(item.id, false)
+                    } else {
+                        store.setHidden(item.id, true)
+                        showUndo($undo, "\(item.name) hidden until you buy it again") { store.setHidden(item.id, false) }
+                    }
+                }
+                .buttonStyle(.borderless)
+                Button("Price & shop") { buying = PurchaseTarget(itemId: item.id, eventId: 0) }
+                    .buttonStyle(.borderless)
+                Button("Bought") {
+                    let buy = store.quickBuy(item)
+                    showUndo($undo, "Bought \(unit.label(buy.amount)) of \(item.name)") { store.undoBuy(buy) }
+                }
+                .buttonStyle(.borderedProminent).controlSize(.small)
             }
-            .buttonStyle(.borderedProminent).controlSize(.small)
+            .font(.subheadline)
         }
         .padding(.vertical, 2)
     }
@@ -127,9 +176,9 @@ struct WeekView: View {
                                 .font(.caption).foregroundColor(.secondary)
                         }
                         HStack(spacing: 8) {
-                            StatTile(value: Qty.format(week.usedTotal), label: "used")
-                            StatTile(value: Qty.format(week.sharedTotal), label: "shared")
-                            StatTile(value: "\(week.items.filter { $0.bought > 0 }.count)", label: "items bought")
+                            StatTile(value: "\(week.itemsUsed)", label: "items used")
+                            StatTile(value: "\(week.timesShared)", label: "times shared")
+                            StatTile(value: "\(week.itemsBought)", label: "items bought")
                         }
                         .padding(.top, 8)
                     }

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.util.LruCache
 import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
@@ -67,6 +68,25 @@ object PhotoStore {
 
     fun load(context: Context, name: String): Bitmap? =
         file(context, name)?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+
+    /** Small cached copies for lists, so many photos don't use up memory. */
+    private val thumbs = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    fun thumbnail(context: Context, name: String, sizePx: Int): Bitmap? {
+        if (name.isBlank()) return null
+        val key = "$name@$sizePx"
+        thumbs.get(key)?.let { return it }
+        val f = file(context, name) ?: return null
+        return runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(f.absolutePath, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= sizePx && bounds.outHeight / (sample * 2) >= sizePx) sample *= 2
+            BitmapFactory.decodeFile(f.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+        }.getOrNull()?.also { thumbs.put(key, it) }
+    }
 }
 
 /** Small on-device settings. */

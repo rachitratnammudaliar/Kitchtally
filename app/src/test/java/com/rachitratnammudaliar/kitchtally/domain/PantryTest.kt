@@ -78,6 +78,29 @@ class PantryTest {
         assertEquals(3.5, week.usedTotal, 0.0)
         assertEquals(1.0, week.sharedTotal, 0.0)
         assertEquals(1L, week.items.first().itemId)
+        assertEquals(2, week.itemsUsed)
+        assertEquals(1, week.timesShared)
+        assertEquals(2, week.itemsBought)
+    }
+
+    @Test
+    fun tapAmounts() {
+        assertEquals(1.0, Pantry.defaultStep(QtyUnit.PACKET), 0.0)
+        assertEquals(0.5, Pantry.defaultStep(QtyUnit.KG), 0.0)
+        // − never takes more than what's left
+        assertEquals(0.5, Pantry.useAmount(0.5, 4.5), 0.0)
+        assertEquals(0.3, Pantry.useAmount(0.5, 0.3), 0.0)
+        assertEquals(0.0, Pantry.useAmount(1.0, 0.0), 0.0)
+        assertEquals(0.0, Pantry.useAmount(1.0, -2.0), 0.0)
+        // ＋ adds one packet, but a whole bag of rice
+        val rice = listOf(bought(10, 5.0, 1245, "Maxima"), used(2, 0.5))
+        assertEquals(5.0, Pantry.buyAmount(QtyUnit.KG, rice), 0.0)
+        assertEquals(1245L, Pantry.expectedPriceMinor(QtyUnit.KG, rice))
+        val bread = listOf(bought(3, 2.0, 178, "IKI"))
+        assertEquals(1.0, Pantry.buyAmount(QtyUnit.PACKET, bread), 0.0)
+        assertEquals(89L, Pantry.expectedPriceMinor(QtyUnit.PACKET, bread))
+        assertEquals(1.0, Pantry.buyAmount(QtyUnit.KG, emptyList()), 0.0)
+        assertNull(Pantry.expectedPriceMinor(QtyUnit.KG, listOf(bought(1, 2.0))))
     }
 
     @Test

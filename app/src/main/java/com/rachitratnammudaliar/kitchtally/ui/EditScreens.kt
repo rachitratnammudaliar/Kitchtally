@@ -152,6 +152,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var unit by rememberSaveable { mutableStateOf(QtyUnit.PACKET.name) }
     var life by rememberSaveable { mutableStateOf(Life.MEDIUM.name) }
     var lowAt by rememberSaveable { mutableStateOf("1") }
+    var stepText by rememberSaveable { mutableStateOf("") }
     var stockText by rememberSaveable { mutableStateOf("") }
     var refill by rememberSaveable { mutableStateOf(false) }
     var notes by rememberSaveable { mutableStateOf("") }
@@ -166,6 +167,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             unit = existing.unit
             life = existing.life
             lowAt = Qty.format(existing.lowAt)
+            stepText = Qty.format(existing.step)
             stockText = Qty.format(maxOf(0.0, state?.stock(existing.id) ?: 0.0))
             refill = existing.refillNeeded
             notes = existing.notes
@@ -177,8 +179,10 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
 
     val lowAtValue = lowAt.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
     val stockValue = if (stockText.isBlank()) 0.0 else stockText.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
+    val stepValue = if (stepText.isBlank()) Pantry.defaultStep(QtyUnit.fromName(unit)) else Qty.parse(stepText)
     val nameError = name.isBlank()
-    val invalid = nameError || lowAtValue == null || stockValue == null || category.isBlank()
+    val duplicate = name.isNotBlank() && state?.items?.any { it.id != id && it.name.trim().equals(name.trim(), ignoreCase = true) } == true
+    val invalid = nameError || lowAtValue == null || stockValue == null || stepValue == null || category.isBlank()
 
     fun leave(savedId: Long) {
         if (savedId == 0L && photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
@@ -200,6 +204,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             refillNeeded = refill,
             notes = notes.trim(),
             photoFile = photo,
+            step = stepValue ?: 1.0,
         )
         val target = Qty.round(stockValue ?: 0.0)
         if (existing == null) {
@@ -251,7 +256,11 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
                 placeholder = { Text("Basmati rice") },
                 singleLine = true,
                 isError = showErrors && nameError,
-                supportingText = errorText(showErrors && nameError, "Enter a name"),
+                supportingText = when {
+                    showErrors && nameError -> errorText(true, "Enter a name")
+                    duplicate -> errorText(true, "You already have an item called this. You can still save it.")
+                    else -> null
+                },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -294,6 +303,15 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
                 )
             }
             Hint("In ${unitValue.plural}. It goes on the shopping list at or below \"running low at\".")
+            NumberField(
+                value = stepText,
+                onChange = { stepText = it },
+                label = "Each − or Shared uses",
+                placeholder = Qty.format(Pantry.defaultStep(unitValue)),
+                isError = showErrors && stepValue == null,
+                error = "An amount above 0",
+            )
+            Hint("For example 0.5 kg of rice per meal, or 1 packet of bread. Leave it empty for ${unitValue.label(Pantry.defaultStep(unitValue))}.")
 
             SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it }
             OutlinedTextField(
@@ -415,7 +433,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 isError = showErrors && qty == null,
                 error = "Enter an amount above 0",
             )
-            OutlinedButton(onClick = { pickDate(context, LocalDate.ofEpochDay(day)) { day = it.toEpochDay() } }, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { pickDate(context, LocalDate.ofEpochDay(day), max = today) { day = it.toEpochDay() } }, modifier = Modifier.fillMaxWidth()) {
                 Text("Bought on ${LocalDate.ofEpochDay(day).format(dateFormat)}")
             }
 

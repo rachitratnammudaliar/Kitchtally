@@ -66,6 +66,26 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(week.usedTotal, 3.5)
         XCTAssertEqual(week.sharedTotal, 1)
         XCTAssertEqual(week.items.first?.itemId, 1)
+        XCTAssertEqual(week.itemsUsed, 2)
+        XCTAssertEqual(week.timesShared, 1)
+        XCTAssertEqual(week.itemsBought, 2)
+    }
+
+    func testTapAmounts() {
+        XCTAssertEqual(Pantry.defaultStep(.PACKET), 1)
+        XCTAssertEqual(Pantry.defaultStep(.KG), 0.5)
+        XCTAssertEqual(Pantry.useAmount(0.5, 4.5), 0.5)
+        XCTAssertEqual(Pantry.useAmount(0.5, 0.3), 0.3)
+        XCTAssertEqual(Pantry.useAmount(1, 0), 0)
+        XCTAssertEqual(Pantry.useAmount(1, -2), 0)
+        let rice = [bought(10, 5, 1245, "Maxima"), used(2, 0.5)]
+        XCTAssertEqual(Pantry.buyAmount(.KG, rice), 5)
+        XCTAssertEqual(Pantry.expectedPriceMinor(.KG, rice), 1245)
+        let bread = [bought(3, 2, 178, "IKI")]
+        XCTAssertEqual(Pantry.buyAmount(.PACKET, bread), 1)
+        XCTAssertEqual(Pantry.expectedPriceMinor(.PACKET, bread), 89)
+        XCTAssertEqual(Pantry.buyAmount(.KG, []), 1)
+        XCTAssertNil(Pantry.expectedPriceMinor(.KG, [bought(1, 2)]))
     }
 
     func testQuantitiesMoneyAndShops() {
@@ -109,8 +129,15 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(c.events[0].priceMinor, 1245)
         XCTAssertNil(c.events[1].priceMinor)
 
-        let again = try Backup.decode(Backup.encode(c.items, c.events))
-        XCTAssertEqual(again.items, c.items)
+        XCTAssertEqual(c.items[0].step, 0.5)
+        XCTAssertFalse(c.items[0].hiddenFromList)
+
+        var items = c.items
+        items[0].step = 0.25
+        items[0].hiddenFromList = true
+        let again = try Backup.decode(Backup.encode(items, c.events, notes: [ShoppingNote(text: "Candles", createdAt: 9)]))
+        XCTAssertEqual(again.items, items)
+        XCTAssertEqual(again.notes.map(\.text), ["Candles"])
         XCTAssertEqual(again.events.map(\.quantity), [5, 0.5])
         XCTAssertThrowsError(try Backup.decode(Data("nope".utf8)))
     }

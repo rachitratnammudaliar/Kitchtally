@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
@@ -86,7 +87,8 @@ val shortDate: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
 @Composable
 fun ItemImage(name: String, photoFile: String, size: Dp = 48.dp, category: String? = null) {
     val context = LocalContext.current
-    val bitmap = remember(photoFile) { if (photoFile.isBlank()) null else PhotoStore.load(context, photoFile) }
+    val px = with(LocalDensity.current) { size.roundToPx() }
+    val bitmap = remember(photoFile, px) { if (photoFile.isBlank()) null else PhotoStore.thumbnail(context, photoFile, px) }
     val shape = RoundedCornerShape(size * 0.25f)
     if (bitmap != null) {
         Image(
@@ -228,12 +230,16 @@ fun NumberField(
     )
 }
 
-fun pickDate(context: Context, date: LocalDate, onPicked: (LocalDate) -> Unit) {
-    DatePickerDialog(
+fun pickDate(context: Context, date: LocalDate, max: LocalDate? = null, onPicked: (LocalDate) -> Unit) {
+    val dialog = DatePickerDialog(
         context,
         { _, y, m, d -> onPicked(LocalDate.of(y, m + 1, d)) },
         date.year,
         date.monthValue - 1,
         date.dayOfMonth,
-    ).show()
+    )
+    if (max != null) {
+        dialog.datePicker.maxDate = max.atTime(23, 59).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+    dialog.show()
 }

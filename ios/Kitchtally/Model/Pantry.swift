@@ -167,6 +167,23 @@ enum Pantry {
         })
     }
 
+    /// Default "uses per tap": half a kilo or litre, otherwise one.
+    static func defaultStep(_ unit: QtyUnit) -> Double { unit == .KG || unit == .LITRE ? 0.5 : 1 }
+
+    /// What one tap of − or Shared takes: the item's step, never more than what's left.
+    static func useAmount(_ step: Double, _ stock: Double) -> Double { max(0, Qty.round(min(max(step, 0.001), stock))) }
+
+    /// What one tap of ＋ adds: one of anything you count; for kilos and litres, the size you usually buy.
+    static func buyAmount(_ unit: QtyUnit, _ entries: [Entry]) -> Double {
+        guard unit == .KG || unit == .LITRE, let q = lastBought(entries)?.quantity, q > 0 else { return 1 }
+        return q
+    }
+
+    static func expectedPriceMinor(_ unit: QtyUnit, _ entries: [Entry]) -> Int64? {
+        guard let last = lastPriced(entries), let unitPrice = unitPriceMinor(last) else { return nil }
+        return totalMinor(unitPrice, buyAmount(unit, entries))
+    }
+
     static func lastBought(_ entries: [Entry]) -> Entry? {
         entries.filter { $0.type == .BOUGHT }.max { $0.date < $1.date }
     }
@@ -235,6 +252,9 @@ enum Pantry {
         let spentByCategory: [String: Int64]
         let usedTotal: Double
         let sharedTotal: Double
+        let itemsUsed: Int
+        let timesShared: Int
+        let itemsBought: Int
     }
 
     static func week(_ start: Day, _ entriesByItem: [Int64: [Entry]], categoryOf: (Int64) -> String) -> Week {
@@ -256,6 +276,9 @@ enum Pantry {
             if w.used == 0 && w.bought == 0 { continue }
             items.append(w)
         }
+        let timesShared = entriesByItem.values.reduce(0) { sum, entries in
+            sum + entries.filter { $0.type == .SHARED && !($0.date < start) && !($0.date > end) }.count
+        }
         var byCategory: [String: Int64] = [:]
         for w in items where w.spentMinor > 0 { byCategory[categoryOf(w.itemId), default: 0] += w.spentMinor }
         items.sort { a, b in a.used != b.used ? a.used > b.used : a.spentMinor > b.spentMinor }
@@ -265,7 +288,10 @@ enum Pantry {
             spentMinor: items.reduce(0) { $0 + $1.spentMinor },
             spentByCategory: byCategory,
             usedTotal: Qty.round(items.reduce(0) { $0 + $1.used }),
-            sharedTotal: Qty.round(items.reduce(0) { $0 + $1.shared })
+            sharedTotal: Qty.round(items.reduce(0) { $0 + $1.shared }),
+            itemsUsed: items.filter { $0.used > 0 }.count,
+            timesShared: timesShared,
+            itemsBought: items.filter { $0.bought > 0 }.count
         )
     }
 

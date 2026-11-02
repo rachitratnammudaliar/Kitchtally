@@ -3,6 +3,16 @@
 package com.rachitratnammudaliar.kitchtally.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -109,8 +119,9 @@ fun detailLine(item: Item, state: PantryState, today: LocalDate): String {
     return "Not bought yet"
 }
 
+/** On the list when marked, out or running low, unless hidden until it's bought again. */
 fun onShoppingList(item: Item, state: PantryState, today: LocalDate): Boolean =
-    item.refillNeeded || Pantry.status(state.entries(item.id), item.lowAt, today) != StockStatus.OK
+    item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.lowAt, today) != StockStatus.OK)
 
 /** Preset categories in order, then the user's own alphabetically. */
 fun orderedCategories(used: List<String>): List<String> {
@@ -137,6 +148,8 @@ fun CoroutineScope.undoSnackbar(host: SnackbarHostState, message: String, onUndo
 fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: PantryViewModel = viewModel()) {
     var route by rememberSaveable { mutableStateOf(startScreen) }
     var tab by rememberSaveable { mutableStateOf(if (startScreen in listOf("shopping", "week")) startScreen else "pantry") }
+    /** Where the purchase screen returns to. */
+    var back by rememberSaveable { mutableStateOf("") }
 
     var today by remember { mutableStateOf(LocalDate.now()) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -161,7 +174,7 @@ fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: Pa
     BackHandler(enabled = route != tab) {
         route = when (parts[0]) {
             "edit" -> if (id1 != 0L) "item:$id1" else tab
-            "buy" -> "item:$id1"
+            "buy" -> back.ifEmpty { "item:$id1" }
             else -> tab
         }
     }
@@ -171,7 +184,7 @@ fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: Pa
             vm = vm, state = state, id = id1, today = today, currency = currency,
             onBack = { route = tab },
             onEdit = { route = "edit:$id1" },
-            onBuy = { eventId -> route = "buy:$id1:$eventId" },
+            onBuy = { eventId -> back = "item:$id1"; route = "buy:$id1:$eventId" },
         )
         "edit" -> EditItemScreen(
             vm = vm, state = state, id = id1,
@@ -179,7 +192,7 @@ fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: Pa
         )
         "buy" -> PurchaseScreen(
             vm = vm, state = state, itemId = id1, eventId = id2, today = today, currency = currency,
-            onDone = { route = "item:$id1" },
+            onDone = { route = back.ifEmpty { "item:$id1" } },
         )
         "settings" -> SettingsScreen(vm = vm, currency = currency, onBack = { route = tab })
         else -> MainTabs(
@@ -187,7 +200,7 @@ fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: Pa
             onTab = { tab = it; route = it },
             onOpen = { route = "item:$it" },
             onAdd = { route = "edit:0" },
-            onBuy = { route = "buy:$it:0" },
+            onBuy = { back = tab; route = "buy:$it:0" },
             onSettings = { route = "settings" },
         )
     }
@@ -230,8 +243,12 @@ private fun MainTabs(
                 NavigationBarItem(
                     selected = tab == "shopping",
                     onClick = { onTab("shopping") },
-                    icon = { Icon(Icons.Default.ShoppingCart, null) },
-                    label = { Text(if (toBuy > 0) "To buy ($toBuy)" else "To buy") },
+                    icon = {
+                        BadgedBox(badge = { if (toBuy + (state?.notes?.size ?: 0) > 0) Badge { Text("${toBuy + (state?.notes?.size ?: 0)}") } }) {
+                            Icon(Icons.Default.ShoppingCart, null)
+                        }
+                    },
+                    label = { Text("To buy") },
                 )
                 NavigationBarItem(selected = tab == "week", onClick = { onTab("week") }, icon = { Icon(Icons.Default.DateRange, null) }, label = { Text("Weekly") })
             }
@@ -269,6 +286,7 @@ private fun PantryList(
 ) {
     val scope = rememberCoroutineScope()
     var filter by rememberSaveable { mutableStateOf("") }
+    var search by rememberSaveable { mutableStateOf("") }
     if (state.items.isEmpty()) {
         Column(modifier.padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
@@ -286,7 +304,11 @@ private fun PantryList(
 
     val categories = orderedCategories(state.usedCategories)
     val active = categories.firstOrNull { it == filter }
-    val shown = state.items.filter { active == null || it.category.equals(active, ignoreCase = true) }
+    val query = search.trim()
+    val shown = state.items.filter {
+        (active == null || it.category.equals(active, ignoreCase = true)) &&
+            (query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.notes.contains(query, ignoreCase = true))
+    }
     val groups = categories.mapNotNull { c ->
         val list = shown.filter { it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
@@ -312,11 +334,33 @@ private fun PantryList(
                     Text("spent on groceries and more", style = MaterialTheme.typography.bodySmall, color = on)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatTile(Qty.format(week.usedTotal), "used", Modifier.weight(1f)) { onTab("week") }
-                        StatTile(Qty.format(week.sharedTotal), "shared", Modifier.weight(1f)) { onTab("week") }
-                        StatTile(toBuy.toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
+                        StatTile(week.itemsUsed.toString(), "items used", Modifier.weight(1f)) { onTab("week") }
+                        StatTile(week.timesShared.toString(), "times shared", Modifier.weight(1f)) { onTab("week") }
+                        StatTile((toBuy + state.notes.size).toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
                     }
                 }
+            }
+        }
+        item(key = "search") {
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it.take(40) },
+                placeholder = { Text("Search your pantry") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = { if (search.isNotEmpty()) IconButton(onClick = { search = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") } },
+                singleLine = true,
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (groups.isEmpty()) {
+            item(key = "no-results") {
+                Text(
+                    "Nothing matches \"$query\"",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                )
             }
         }
         if (categories.size > 1) {
@@ -342,18 +386,18 @@ private fun PantryList(
                         today = today,
                         onClick = { onOpen(row.id) },
                         onUse = {
-                            vm.log(row.id, EventType.USED) { eventId ->
-                                scope.undoSnackbar(snackbar, "Used 1 ${row.unitValue().singular} of ${row.name}") { vm.undo(eventId) }
+                            vm.use(row, shared = false) { eventId, amount ->
+                                scope.undoSnackbar(snackbar, "Used ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
                             }
                         },
                         onShare = {
-                            vm.log(row.id, EventType.SHARED) { eventId ->
-                                scope.undoSnackbar(snackbar, "Shared 1 ${row.unitValue().singular} of ${row.name}") { vm.undo(eventId) }
+                            vm.use(row, shared = true) { eventId, amount ->
+                                scope.undoSnackbar(snackbar, "Shared ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
                             }
                         },
                         onBuy = {
-                            vm.quickBuy(state, row.id) { eventId ->
-                                scope.undoSnackbar(snackbar, "Added 1 ${row.unitValue().singular} of ${row.name}") { vm.undo(eventId) }
+                            vm.quickBuy(state, row) { buy ->
+                                scope.undoSnackbar(snackbar, "Added ${row.unitValue().label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
                             }
                         },
                     )
@@ -412,26 +456,24 @@ private fun ShoppingList(
     modifier: Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    var newText by rememberSaveable { mutableStateOf("") }
     val list = state.items.filter { onShoppingList(it, state, today) }
-    if (list.isEmpty()) {
-        Column(modifier.padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Nothing to buy", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Items appear here when they run out, run low, or you mark them as needing a refill.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        return
-    }
+    fun status(item: Item) = Pantry.status(state.entries(item.id), item.lowAt, today)
     val sections = listOf(
-        "Out" to list.filter { Pantry.status(state.entries(it.id), it.lowAt, today) == StockStatus.OUT },
-        "Running low" to list.filter { Pantry.status(state.entries(it.id), it.lowAt, today) == StockStatus.LOW },
-        "Refill needed" to list.filter { Pantry.status(state.entries(it.id), it.lowAt, today) == StockStatus.OK },
+        "Out" to list.filter { status(it) == StockStatus.OUT },
+        "Running low" to list.filter { status(it) == StockStatus.LOW },
+        "Refill needed" to list.filter { status(it) == StockStatus.OK },
     ).filter { it.second.isNotEmpty() }
-    val estimate = list.sumOf { item ->
-        Pantry.lastPriced(state.entries(item.id))?.let { Pantry.unitPriceMinor(it) } ?: 0L
+    val estimate = list.sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id)) ?: 0L }
+    val hidden = state.items.filter { it.hiddenFromList && Pantry.status(state.entries(it.id), it.lowAt, today) != StockStatus.OK }
+
+    fun add() {
+        val text = newText.trim()
+        if (text.isEmpty()) return
+        vm.addNote(text, state) { matched ->
+            if (matched) scope.launch { snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar("$text is in your pantry, so it's marked as needing a refill") }
+        }
+        newText = ""
     }
 
     LazyColumn(
@@ -439,49 +481,129 @@ private fun ShoppingList(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item(key = "summary") {
-            Text(
-                "${list.size} item${if (list.size == 1) "" else "s"}" + if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp),
+        item(key = "add") {
+            OutlinedTextField(
+                value = newText,
+                onValueChange = { newText = it.take(80) },
+                placeholder = { Text("Add something to buy") },
+                singleLine = true,
+                shape = RoundedCornerShape(24.dp),
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { add() }),
+                trailingIcon = { IconButton(onClick = { add() }, enabled = newText.isNotBlank()) { Icon(Icons.Default.Add, contentDescription = "Add") } },
+                modifier = Modifier.fillMaxWidth(),
             )
         }
-        sections.forEach { (title, items) ->
-            item(key = "section-$title") {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, start = 4.dp))
+        if (list.isEmpty() && state.notes.isEmpty()) {
+            item(key = "empty") {
+                Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🛒", style = MaterialTheme.typography.displaySmall)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Nothing to buy", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Pantry items appear here when they run out, run low, or you mark them as needing a refill. You can also type anything above.",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            items.sortedBy { it.name.lowercase() }.forEach { row ->
-                item(key = "buy-${row.id}") {
-                    val entries = state.entries(row.id)
-                    val last = Pantry.lastPriced(entries)
-                    val unitPrice = last?.let { Pantry.unitPriceMinor(it) }
-                    Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ItemImage(row.name, row.photoFile, size = 46.dp, category = row.category)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    stockLabel(row, Pantry.stock(entries)) +
-                                        (unitPrice?.let { " · ${Money.format(it, currency)} ${row.unitValue().priceLabel}" } ?: "") +
-                                        (last?.shop?.takeIf { it.isNotBlank() }?.let { " at $it" } ?: ""),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            TextButton(onClick = { onBuy(row.id) }) { Text("Details") }
-                            FilledTonalButton(onClick = {
-                                vm.quickBuy(state, row.id) { eventId ->
-                                    scope.undoSnackbar(snackbar, "Bought 1 ${row.unitValue().singular} of ${row.name}") { vm.undo(eventId) }
-                                }
-                            }) { Text("Bought") }
+        } else {
+            item(key = "summary") {
+                val count = list.size + state.notes.size
+                Text(
+                    "$count to buy" + if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
+            }
+        }
+        if (state.notes.isNotEmpty()) {
+            item(key = "notes-title") { SectionTitle("📝  Also need") }
+            state.notes.forEach { note ->
+                item(key = "note-${note.id}") {
+                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                        Row(Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = false, onCheckedChange = {
+                                vm.deleteNote(note)
+                                scope.undoSnackbar(snackbar, "Got ${note.text}") { vm.restoreNote(note) }
+                            })
+                            Text(note.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         }
                     }
                 }
             }
         }
+        sections.forEach { (title, items) ->
+            item(key = "section-$title") { SectionTitle(title) }
+            items.sortedBy { it.name.lowercase() }.forEach { row ->
+                item(key = "buy-${row.id}") {
+                    val entries = state.entries(row.id)
+                    val unit = row.unitValue()
+                    val buyAmount = Pantry.buyAmount(unit, entries)
+                    val expected = Pantry.expectedPriceMinor(unit, entries)
+                    val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
+                    Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                ItemImage(row.name, row.photoFile, size = 46.dp, category = row.category)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    StockPill(stockLabel(row, Pantry.stock(entries)), Pantry.status(entries, row.lowAt, today))
+                                    Text(
+                                        "Usually ${unit.label(buyAmount)}" +
+                                            (expected?.let { " · ${Money.format(it, currency)}" } ?: "") +
+                                            (if (shop.isNotBlank()) " at $shop" else ""),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
+                                TextButton(onClick = {
+                                    if (row.refillNeeded && Pantry.status(entries, row.lowAt, today) == StockStatus.OK) {
+                                        vm.setRefillNeeded(row, false)
+                                    } else {
+                                        vm.setHidden(row, true)
+                                        scope.undoSnackbar(snackbar, "${row.name} hidden until you buy it again") { vm.setHidden(row, false) }
+                                    }
+                                }) { Text("Not now") }
+                                TextButton(onClick = { onBuy(row.id) }) { Text("Price & shop") }
+                                FilledTonalButton(onClick = {
+                                    vm.quickBuy(state, row) { buy ->
+                                        scope.undoSnackbar(snackbar, "Bought ${unit.label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
+                                    }
+                                }) { Text("Bought") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (hidden.isNotEmpty()) {
+            item(key = "hidden") {
+                Text(
+                    "Hidden until bought: " + hidden.joinToString { it.name },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp, start = 4.dp, end = 4.dp),
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 10.dp, start = 4.dp),
+    )
 }
 
 /* ============================ Weekly summary ============================ */
@@ -531,9 +653,9 @@ private fun WeekSummary(state: PantryState, today: LocalDate, currency: String, 
                     }
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatTile(Qty.format(week.usedTotal), "used", Modifier.weight(1f))
-                        StatTile(Qty.format(week.sharedTotal), "shared", Modifier.weight(1f))
-                        StatTile(week.items.count { it.bought > 0 }.toString(), "items bought", Modifier.weight(1f))
+                        StatTile(week.itemsUsed.toString(), "items used", Modifier.weight(1f))
+                        StatTile(week.timesShared.toString(), "times shared", Modifier.weight(1f))
+                        StatTile(week.itemsBought.toString(), "items bought", Modifier.weight(1f))
                     }
                 }
             }

@@ -21,7 +21,7 @@ struct RootView: View {
     private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let toBuy = store.items.filter { store.onShoppingList($0, today) }.count
+        let toBuy = store.items.filter { store.onShoppingList($0, today) }.count + store.notes.count
         TabView(selection: $tab) {
             PantryView(today: today, tab: $tab)
                 .tabItem { Label("Pantry", systemImage: "house") }
@@ -60,7 +60,7 @@ struct ItemImage: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.25, style: .continuous)
-        if let image = PhotoStore.load(photoFile) {
+        if let image = PhotoStore.thumbnail(photoFile, size: size) {
             Image(uiImage: image).resizable().scaledToFill().frame(width: size, height: size).clipShape(shape)
         } else if let category = category {
             ZStack {
@@ -155,7 +155,33 @@ struct UndoToast: View {
 struct UndoState: Equatable {
     let id = UUID()
     let message: String
-    let eventId: Int64
+    let undo: () -> Void
+
+    static func == (a: UndoState, b: UndoState) -> Bool { a.id == b.id }
+}
+
+/// Shows an undo message for four seconds.
+@MainActor
+func showUndo(_ state: Binding<UndoState?>, _ message: String, _ undo: @escaping () -> Void) {
+    let new = UndoState(message: message, undo: undo)
+    withAnimation { state.wrappedValue = new }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+        if state.wrappedValue == new { withAnimation { state.wrappedValue = nil } }
+    }
+}
+
+extension View {
+    /// The undo message at the bottom of a screen.
+    func undoOverlay(_ state: Binding<UndoState?>) -> some View {
+        overlay(alignment: .bottom) {
+            if let u = state.wrappedValue {
+                UndoToast(message: u.message) {
+                    u.undo()
+                    withAnimation { state.wrappedValue = nil }
+                }
+            }
+        }
+    }
 }
 
 /// The camera, for taking a photo of an item or a receipt.

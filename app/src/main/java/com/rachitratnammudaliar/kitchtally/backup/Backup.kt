@@ -2,6 +2,8 @@ package com.rachitratnammudaliar.kitchtally.backup
 
 import com.rachitratnammudaliar.kitchtally.data.Event
 import com.rachitratnammudaliar.kitchtally.data.Item
+import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
+import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
@@ -14,11 +16,11 @@ import org.json.JSONObject
  */
 object Backup {
     private const val FORMAT = "kitchtally-backup"
-    private const val VERSION = 1
+    private const val VERSION = 2
 
-    data class Contents(val items: List<Item>, val events: List<Event>)
+    data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList())
 
-    fun encode(items: List<Item>, events: List<Event>): String {
+    fun encode(items: List<Item>, events: List<Event>, notes: List<ShoppingNote> = emptyList()): String {
         val itemsJson = JSONArray()
         items.forEach { i ->
             itemsJson.put(
@@ -31,7 +33,9 @@ object Backup {
                     .put("lowAt", i.lowAt)
                     .put("refillNeeded", i.refillNeeded)
                     .put("notes", i.notes)
-                    .put("createdAt", i.createdAt),
+                    .put("createdAt", i.createdAt)
+                    .put("step", i.step)
+                    .put("hiddenFromList", i.hiddenFromList),
             )
         }
         val ids = items.map { it.id }.toSet()
@@ -49,11 +53,14 @@ object Backup {
                     .put("createdAt", e.createdAt),
             )
         }
+        val notesJson = JSONArray()
+        notes.forEach { n -> notesJson.put(JSONObject().put("text", n.text).put("createdAt", n.createdAt)) }
         return JSONObject()
             .put("format", FORMAT)
             .put("version", VERSION)
             .put("items", itemsJson)
             .put("events", eventsJson)
+            .put("shopping", notesJson)
             .toString(2)
     }
 
@@ -76,16 +83,20 @@ object Backup {
             val name = o.optString("name").trim()
             if (name.isEmpty() || !o.has("ref")) continue
             val lowAt = o.optDouble("lowAt", 1.0).let { if (it.isNaN() || it < 0) 1.0 else it.coerceAtMost(10_000.0) }
+            val unit = QtyUnit.fromName(o.optString("unit"))
+            val step = o.optDouble("step", Pantry.defaultStep(unit)).let { if (it.isNaN() || it <= 0) Pantry.defaultStep(unit) else it.coerceAtMost(10_000.0) }
             items += Item(
                 id = o.optLong("ref"),
                 name = name.take(60),
                 category = o.optString("category", "Groceries").trim().ifBlank { "Groceries" }.take(40),
-                unit = QtyUnit.fromName(o.optString("unit")).name,
+                unit = unit.name,
                 life = Life.fromName(o.optString("life")).name,
                 lowAt = lowAt,
                 refillNeeded = o.optBoolean("refillNeeded", false),
                 notes = o.optString("notes").take(500),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                step = step,
+                hiddenFromList = o.optBoolean("hiddenFromList", false),
             )
         }
         val refs = items.map { it.id }.toSet()
@@ -110,6 +121,13 @@ object Backup {
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
             )
         }
-        return Contents(items, events)
+        val notes = mutableListOf<ShoppingNote>()
+        val notesJson = root.optJSONArray("shopping") ?: JSONArray()
+        for (i in 0 until notesJson.length()) {
+            val o = notesJson.optJSONObject(i) ?: continue
+            val text = o.optString("text").trim()
+            if (text.isNotEmpty()) notes += ShoppingNote(text = text.take(80), createdAt = o.optLong("createdAt", System.currentTimeMillis()))
+        }
+        return Contents(items, events, notes)
     }
 }

@@ -44,7 +44,9 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 
 **Pantry**
 - Items with a photo (camera or gallery), category, unit (pieces, packets, bottles, boxes, bags, kg, litres) and how long they last: short (bread, milk), medium (onions, eggs) or long (rice, atta, pasta)
-- **＋** adds one more, logged as refilled today at last time's shop and price. **−** uses one. **Shared** uses one cooked for friends; it counts quantity only, never money
+- **＋** adds one more (for kilos and litres, the bag size you usually buy), logged as refilled today at last time's shop and price
+- **−** uses the item's amount per tap, for example 1 packet of bread or 0.5 kg of rice. **Shared** does the same for cooking with friends; it counts quantity only, never money
+- Stock never goes below zero, and search finds any item
 - Every quick action can be undone
 - Stock pills: green when there's enough, amber when running low, red when out
 - "About 4 days left", worked out from how fast you've been using it
@@ -55,12 +57,15 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - Shops: IKI, Norfa, Maxima, Lidl, Rimi, Pepco, or type your own; it's remembered for next time
 - Last price and shop shown on each item
 
-**Shopping list**
-- Everything that's out, running low (at or below your "running low at" amount, or likely to run out within 2 days), or marked **Refill needed**
-- Tap **Bought** in the shop, and an estimate of the total at last prices
+**Shopping list** (its own tab)
+- Type anything at the top, like candles or foil, and tick it off in the shop. Typing a pantry item's name marks that item instead
+- Pantry items that are out, running low (at or below your "running low at" amount, or likely to run out within 2 days), or marked **Refill needed**
+- **Bought** logs your usual amount at your usual price, **Price & shop** to enter details, **Not now** hides an item until you next buy it
+- An estimate of the total at last prices
 
 **Weekly summary** (Monday to Sunday)
 - Money spent, compared with the week before, and spent by category
+- Items used, times shared and items bought
 - Used and shared per item: "Bread: used 3 packets (1 shared), bought 2"
 - Go back to any earlier week
 
@@ -86,7 +91,7 @@ See [PRIVACY.md](PRIVACY.md).
 | Android | Kotlin, Jetpack Compose, Material 3, Room |
 | iPhone, iPad | Swift and SwiftUI, a port of the same logic with the same unit tests |
 
-Unit tests cover stock counting, running-low and days-left estimates, prices per kg, weekly summaries and backups. They run for Android and on an iPhone simulator for every change. Raising the number in `version.txt` builds both apps on GitHub Actions and publishes them together. The screenshots are taken by a robot that opens the app with sample data in an Android emulator.
+Unit tests cover stock counting, tap amounts, running-low and days-left estimates, prices per kg, weekly summaries and backups. They run for Android and on an iPhone simulator for every change, and an Android emulator checks that data from older versions upgrades correctly. Raising the number in `version.txt` builds both apps on GitHub Actions and publishes them together. The screenshots are taken by a robot that opens the app with sample data in an Android emulator.
 
 ```
 app/   Android app

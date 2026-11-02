@@ -122,6 +122,25 @@ object Pantry {
         },
     )
 
+    /** Default "uses per tap": half a kilo or litre, otherwise one. */
+    fun defaultStep(unit: QtyUnit): Double = if (unit == QtyUnit.KG || unit == QtyUnit.LITRE) 0.5 else 1.0
+
+    /** What one tap of − or Shared takes: the item's step, never more than what's left. */
+    fun useAmount(step: Double, stock: Double): Double = Qty.round(minOf(step.coerceAtLeast(0.001), stock)).coerceAtLeast(0.0)
+
+    /**
+     * What one tap of ＋ adds: one of anything you count; for kilos and litres, the size you
+     * usually buy (the last purchase), so a 5 kg bag of rice adds 5 kg.
+     */
+    fun buyAmount(unit: QtyUnit, entries: List<Entry>): Double =
+        if (unit == QtyUnit.KG || unit == QtyUnit.LITRE) lastBought(entries)?.quantity?.takeIf { it > 0 } ?: 1.0 else 1.0
+
+    /** The expected price of [buyAmount] at the last price paid, or null if no price is known. */
+    fun expectedPriceMinor(unit: QtyUnit, entries: List<Entry>): Long? {
+        val unitPrice = lastPriced(entries)?.let { unitPriceMinor(it) } ?: return null
+        return totalMinor(unitPrice, buyAmount(unit, entries))
+    }
+
     fun lastBought(entries: List<Entry>): Entry? =
         entries.filter { it.type == EventType.BOUGHT }.maxByOrNull { it.date }
 
@@ -191,6 +210,12 @@ object Pantry {
         val spentByCategory: Map<String, Long>,
         val usedTotal: Double,
         val sharedTotal: Double,
+        /** Different items used (amounts in different units can't be added up). */
+        val itemsUsed: Int,
+        /** How many times something was shared. */
+        val timesShared: Int,
+        /** Different items bought. */
+        val itemsBought: Int,
     )
 
     /**
@@ -208,6 +233,9 @@ object Pantry {
             val week = ItemWeek(id, Qty.round(used), Qty.round(shared), Qty.round(boughtEntries.sumOf { it.quantity }), boughtEntries.sumOf { it.priceMinor ?: 0 })
             if (week.used == 0.0 && week.bought == 0.0) null else week
         }
+        val timesShared = entriesByItem.values.sumOf { entries ->
+            entries.count { it.type == EventType.SHARED && !it.date.isBefore(start) && !it.date.isAfter(end) }
+        }
         val byCategory = items.filter { it.spentMinor > 0 }
             .groupBy { categoryOf(it.itemId) }
             .mapValues { (_, l) -> l.sumOf { it.spentMinor } }
@@ -218,6 +246,9 @@ object Pantry {
             spentByCategory = byCategory,
             usedTotal = Qty.round(items.sumOf { it.used }),
             sharedTotal = Qty.round(items.sumOf { it.shared }),
+            itemsUsed = items.count { it.used > 0 },
+            timesShared = timesShared,
+            itemsBought = items.count { it.bought > 0 },
         )
     }
 

@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["app/src/main/**", "scripts/screenshots.sh", ".github/workflows/screenshots.yml"]
+    paths: ["app/src/main/**", "app/src/androidTest/**", "scripts/screenshots.sh", ".github/workflows/screenshots.yml"]
 
 permissions:
   contents: write
@@ -43,7 +43,9 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: ./scripts/screenshots.sh
+          script: |
+            ./gradlew --no-daemon connectedDebugAndroidTest
+            ./scripts/screenshots.sh
 
       - name: Commit screenshots
         run: |

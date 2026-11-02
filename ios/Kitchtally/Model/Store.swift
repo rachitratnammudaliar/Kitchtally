@@ -12,9 +12,29 @@ struct Item: Identifiable, Equatable {
     var photoFile: String = ""
     var notes: String = ""
     var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    /// How much one tap of − or Shared takes.
+    var step: Double = 1
+    /// Kept off the shopping list until it's bought again.
+    var hiddenFromList: Bool = false
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var lifeValue: Life { Life.from(life) }
+}
+
+/// Something to buy that isn't a pantry item.
+struct ShoppingNote: Identifiable, Equatable {
+    var id: Int64 = 0
+    var text: String
+    var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+}
+
+/// What a quick ＋ changed, so Undo can put everything back.
+struct QuickBuy {
+    let eventId: Int64
+    let amount: Double
+    let itemId: Int64
+    let wasRefill: Bool
+    let wasHidden: Bool
 }
 
 struct Event: Identifiable, Equatable {
@@ -43,12 +63,13 @@ enum Backup {
         var errorDescription: String? { "This file isn't a Kitchtally backup." }
     }
 
-    static func encode(_ items: [Item], _ events: [Event], includePhotos: Bool = false) -> Data {
+    static func encode(_ items: [Item], _ events: [Event], notes: [ShoppingNote] = [], includePhotos: Bool = false) -> Data {
         let ids = Set(items.map(\.id))
         let itemsJson: [[String: Any]] = items.map { i in
             var o: [String: Any] = [
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
+                "step": i.step, "hiddenFromList": i.hiddenFromList,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -61,7 +82,8 @@ enum Backup {
             if includePhotos { o["receiptFile"] = e.receiptFile }
             return o
         }
-        let root: [String: Any] = ["format": format, "version": 1, "items": itemsJson, "events": eventsJson]
+        let notesJson: [[String: Any]] = notes.map { ["text": $0.text, "createdAt": $0.createdAt] }
+        let root: [String: Any] = ["format": format, "version": 2, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -74,7 +96,7 @@ enum Backup {
         return n
     }
 
-    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event]) {
+    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event], notes: [ShoppingNote]) {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               root["format"] as? String == format else { throw BackupError.notABackup }
         var items: [Item] = []
@@ -84,17 +106,22 @@ enum Backup {
             var lowAt = number(o, "lowAt")?.doubleValue ?? 1
             if lowAt.isNaN || lowAt < 0 { lowAt = 1 }
             let category = string(o, "category", "Groceries").trimmingCharacters(in: .whitespaces)
+            let unit = QtyUnit.from(string(o, "unit"))
+            var step = number(o, "step")?.doubleValue ?? Pantry.defaultStep(unit)
+            if step.isNaN || step <= 0 { step = Pantry.defaultStep(unit) }
             items.append(Item(
                 id: ref,
                 name: String(name.prefix(60)),
                 category: String((category.isEmpty ? "Groceries" : category).prefix(40)),
-                unit: QtyUnit.from(string(o, "unit")).rawValue,
+                unit: unit.rawValue,
                 life: Life.from(string(o, "life")).rawValue,
                 lowAt: min(lowAt, 10_000),
                 refillNeeded: (o["refillNeeded"] as? Bool) ?? false,
                 photoFile: includePhotos ? string(o, "photoFile") : "",
                 notes: String(string(o, "notes").prefix(500)),
-                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
+                step: min(step, 10_000),
+                hiddenFromList: (o["hiddenFromList"] as? Bool) ?? false
             ))
         }
         let refs = Set(items.map(\.id))
@@ -118,7 +145,14 @@ enum Backup {
                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
             ))
         }
-        return (items, events)
+        var notes: [ShoppingNote] = []
+        for case let o as [String: Any] in root["shopping"] as? [Any] ?? [] {
+            let text = string(o, "text").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                notes.append(ShoppingNote(text: String(text.prefix(80)), createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)))
+            }
+        }
+        return (items, events, notes)
     }
 }
 
@@ -150,6 +184,28 @@ enum PhotoStore {
         name.isEmpty ? nil : UIImage(contentsOfFile: directory.appendingPathComponent(name).path)
     }
 
+    private static let thumbs: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.totalCostLimit = 24 * 1024 * 1024
+        return cache
+    }()
+
+    /// A small cached copy for lists, so many photos stay fast.
+    static func thumbnail(_ name: String, size: CGFloat) -> UIImage? {
+        guard !name.isEmpty else { return nil }
+        let key = "\(name)@\(Int(size))" as NSString
+        if let cached = thumbs.object(forKey: key) { return cached }
+        guard let image = load(name) else { return nil }
+        let side = size * UIScreen.main.scale
+        let scale = side / min(image.size.width, image.size.height)
+        let target = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let small = UIGraphicsImageRenderer(size: target, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: target)) }
+        thumbs.setObject(small, forKey: key, cost: Int(target.width * target.height * 4))
+        return small
+    }
+
     static func delete(_ name: String) {
         if !name.isEmpty { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
     }
@@ -160,6 +216,7 @@ enum PhotoStore {
 final class Store: ObservableObject {
     @Published private(set) var items: [Item] = []
     @Published private(set) var events: [Event] = []
+    @Published private(set) var notes: [ShoppingNote] = []
     @Published var problem: String?
     @Published var currency: String {
         didSet { UserDefaults.standard.set(currency, forKey: "currency") }
@@ -167,6 +224,7 @@ final class Store: ObservableObject {
 
     private let fileURL: URL
     private var nextEventId: Int64 = 1
+    private var nextNoteId: Int64 = 1
 
     init(directory: URL? = nil) {
         let dir = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -190,7 +248,10 @@ final class Store: ObservableObject {
     var usedCategories: [String] { items.map(\.category) }
 
     func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), lowAt: item.lowAt, today) }
-    func onShoppingList(_ item: Item, _ today: Day) -> Bool { item.refillNeeded || status(item, today) != .ok }
+    /// On the list when marked, out or running low, unless hidden until it's bought again.
+    func onShoppingList(_ item: Item, _ today: Day) -> Bool {
+        item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok)
+    }
 
     // MARK: Saving
 
@@ -205,6 +266,12 @@ final class Store: ObservableObject {
                 nextEventId += 1
                 return copy
             }
+            notes = contents.notes.map { n in
+                var copy = n
+                copy.id = nextNoteId
+                nextNoteId += 1
+                return copy
+            }
         } catch {
             let kept = fileURL.deletingLastPathComponent().appendingPathComponent("pantry-unreadable-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: fileURL, to: kept)
@@ -214,7 +281,7 @@ final class Store: ObservableObject {
 
     private func persist() {
         do {
-            try Backup.encode(items, events, includePhotos: true).write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try Backup.encode(items, events, notes: notes, includePhotos: true).write(to: fileURL, options: [.atomic, .completeFileProtection])
         } catch {
             problem = "Couldn't save: \(error.localizedDescription)"
         }
@@ -246,6 +313,18 @@ final class Store: ObservableObject {
         persist()
     }
 
+    func setHidden(_ id: Int64, _ hidden: Bool) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id {
+                copy.hiddenFromList = hidden
+                if hidden { copy.refillNeeded = false }
+            }
+            return copy
+        }
+        persist()
+    }
+
     func setRefillNeeded(_ id: Int64, _ needed: Bool) {
         items = items.map { i in
             var copy = i
@@ -271,22 +350,84 @@ final class Store: ObservableObject {
         return nextEventId - 1
     }
 
-    /// The quick "+": one more, today, at last time's shop and unit price.
-    @discardableResult
-    func quickBuy(_ itemId: Int64) -> Int64 {
-        let list = entries(itemId)
-        let last = Pantry.lastPriced(list)
-        let price = last.flatMap { Pantry.unitPriceMinor($0) }.map { Pantry.totalMinor($0, 1) }
-        let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(list)?.shop ?? "")
-        return log(itemId, .BOUGHT, quantity: 1, priceMinor: price, shop: shop)
+    /// − or Shared: the item's step, never more than is left. Returns the event id and amount, or nil at zero.
+    func use(_ item: Item, shared: Bool) -> (Int64, Double)? {
+        let amount = Pantry.useAmount(item.step, stock(item.id))
+        guard amount > 0 else { return nil }
+        return (log(item.id, shared ? .SHARED : .USED, quantity: amount), amount)
     }
 
+    /// The quick ＋: one more (or the usual pack size for kilos and litres), today, at last time's shop and price.
+    func quickBuy(_ item: Item) -> QuickBuy {
+        let list = entries(item.id)
+        let amount = Pantry.buyAmount(item.unitValue, list)
+        let price = Pantry.expectedPriceMinor(item.unitValue, list)
+        let last = Pantry.lastPriced(list)
+        let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(list)?.shop ?? "")
+        let id = log(item.id, .BOUGHT, quantity: amount, priceMinor: price, shop: shop)
+        return QuickBuy(eventId: id, amount: amount, itemId: item.id, wasRefill: item.refillNeeded, wasHidden: item.hiddenFromList)
+    }
+
+    func undoBuy(_ buy: QuickBuy) {
+        events.removeAll { $0.id == buy.eventId }
+        items = items.map { i in
+            var copy = i
+            if i.id == buy.itemId {
+                copy.refillNeeded = buy.wasRefill
+                copy.hiddenFromList = buy.wasHidden
+            }
+            return copy
+        }
+        persist()
+    }
+
+    /// After buying: off the manual list, and shown again if it was hidden.
     private func clearRefill(_ id: Int64) {
         items = items.map { i in
             var copy = i
-            if i.id == id { copy.refillNeeded = false }
+            if i.id == id {
+                copy.refillNeeded = false
+                copy.hiddenFromList = false
+            }
             return copy
         }
+    }
+
+    /// Adds a line to the shopping list, or marks a pantry item with that name. Returns true if it matched an item.
+    @discardableResult
+    func addNote(_ text: String) -> Bool {
+        let clean = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard !clean.isEmpty else { return false }
+        if let match = items.first(where: { $0.name.lowercased() == clean.lowercased() }) {
+            items = items.map { i in
+                var copy = i
+                if i.id == match.id {
+                    copy.refillNeeded = true
+                    copy.hiddenFromList = false
+                }
+                return copy
+            }
+            persist()
+            return true
+        }
+        notes.append(ShoppingNote(id: nextNoteId, text: clean))
+        nextNoteId += 1
+        persist()
+        return false
+    }
+
+    func deleteNote(_ id: Int64) {
+        notes.removeAll { $0.id == id }
+        persist()
+    }
+
+    func restoreNote(_ note: ShoppingNote) {
+        var copy = note
+        copy.id = nextNoteId
+        nextNoteId += 1
+        notes.append(copy)
+        notes.sort { $0.createdAt < $1.createdAt }
+        persist()
     }
 
     func saveEvent(_ e: Event) {
@@ -312,7 +453,7 @@ final class Store: ObservableObject {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("kitchtally-backup-\(f.string(from: Date())).json")
-        try Backup.encode(items, events).write(to: url, options: .atomic)
+        try Backup.encode(items, events, notes: notes).write(to: url, options: .atomic)
         return url
     }
 
@@ -329,6 +470,12 @@ final class Store: ObservableObject {
                 appendEvent(ev)
             }
             nextItem += 1
+        }
+        for n in contents.notes {
+            var copy = n
+            copy.id = nextNoteId
+            nextNoteId += 1
+            notes.append(copy)
         }
         persist()
         return contents.items.count

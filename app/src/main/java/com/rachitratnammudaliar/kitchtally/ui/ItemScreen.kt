@@ -137,13 +137,13 @@ fun ItemScreen(
             // Quick actions
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
-                    vm.log(id, EventType.USED) { e -> scope.undoSnackbar(snackbar, "Used 1 ${unit.singular}") { vm.undo(e) } }
+                    vm.use(item, shared = false) { e, amount -> scope.undoSnackbar(snackbar, "Used ${unit.label(amount)}") { vm.undo(e) } }
                 }, enabled = stock > 0, modifier = Modifier.weight(1f)) { Text("− Used") }
                 OutlinedButton(onClick = {
-                    vm.log(id, EventType.SHARED) { e -> scope.undoSnackbar(snackbar, "Shared 1 ${unit.singular}") { vm.undo(e) } }
+                    vm.use(item, shared = true) { e, amount -> scope.undoSnackbar(snackbar, "Shared ${unit.label(amount)}") { vm.undo(e) } }
                 }, enabled = stock > 0, modifier = Modifier.weight(1f)) { Text("Shared") }
                 Button(onClick = {
-                    vm.quickBuy(state, id) { e -> scope.undoSnackbar(snackbar, "Added 1 ${unit.singular}") { vm.undo(e) } }
+                    vm.quickBuy(state, item) { buy -> scope.undoSnackbar(snackbar, "Added ${unit.label(buy.amount)}") { vm.undoBuy(buy) } }
                 }, modifier = Modifier.weight(1f)) { Text("＋ Bought") }
             }
             FilledTonalButton(onClick = { onBuy(0) }, modifier = Modifier.fillMaxWidth()) { Text("Log a purchase with price and shop") }
@@ -153,6 +153,13 @@ fun ItemScreen(
                 checked = item.refillNeeded,
                 onChange = { vm.setRefillNeeded(item, it) },
             )
+            if (item.hiddenFromList) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Hint("Hidden from the shopping list until you buy it again.")
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { vm.setHidden(item, false) }) { Text("Show again") }
+                }
+            }
 
             // Info
             Card(Modifier.fillMaxWidth()) {
@@ -162,6 +169,8 @@ fun ItemScreen(
                     InfoRow("Lasts", item.lifeValue().label, item.lifeValue().description)
                     HorizontalDivider()
                     InfoRow("Running low at", unit.label(item.lowAt))
+                    HorizontalDivider()
+                    InfoRow("Each tap", "− uses ${unit.label(item.step)}", "＋ adds ${unit.label(Pantry.buyAmount(unit, entries))}")
                     Pantry.dailyUse(entries, today)?.let { rate ->
                         HorizontalDivider()
                         val perWeek = Qty.approx(rate * 7)

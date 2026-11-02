@@ -11,6 +11,8 @@ import com.rachitratnammudaliar.kitchtally.data.Event
 import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.PhotoStore
 import com.rachitratnammudaliar.kitchtally.data.Prefs
+import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
+import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
@@ -26,6 +28,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
@@ -33,6 +37,7 @@ import java.time.LocalDate
 data class PantryState(
     val items: List<Item>,
     val events: List<Event>,
+    val notes: List<ShoppingNote> = emptyList(),
 ) {
     val eventsByItem: Map<Long, List<Event>> = events.groupBy { it.itemId }
     val entriesByItem: Map<Long, List<Entry>> = eventsByItem.mapValues { (_, l) -> l.map { it.toEntry() } }
@@ -52,9 +57,12 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = db.pantry()
     private val prefs = Prefs(app)
 
-    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents()) { items, events ->
-        PantryState(items, events)
+    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes()) { items, events, notes ->
+        PantryState(items, events, notes)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Quick taps are handled one at a time, so stock can't go below zero. */
+    private val tapLock = Mutex()
 
     private val _currency = MutableStateFlow(prefs.currency)
     val currency: StateFlow<String> = _currency.asStateFlow()
@@ -96,7 +104,88 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setRefillNeeded(item: Item, needed: Boolean) {
-        viewModelScope.launch { dao.update(item.copy(refillNeeded = needed)) }
+        viewModelScope.launch { dao.setRefill(item.id, needed) }
+    }
+
+    /** Hides an item from the shopping list until it's bought again, or shows it again. */
+    fun setHidden(item: Item, hidden: Boolean) {
+        viewModelScope.launch {
+            dao.update((dao.item(item.id) ?: return@launch).copy(hiddenFromList = hidden, refillNeeded = if (hidden) false else item.refillNeeded))
+        }
+    }
+
+    /**
+     * − (used) or Shared: takes the item's "uses per tap" amount, never more than is left.
+     * [onLogged] gets the event id and the amount, for the Undo message. Nothing happens at zero.
+     */
+    fun use(item: Item, shared: Boolean, onLogged: (eventId: Long, amount: Double) -> Unit) {
+        viewModelScope.launch {
+            tapLock.withLock {
+                val amount = Pantry.useAmount(item.step, dao.stockOf(item.id))
+                if (amount <= 0) return@withLock
+                val type = if (shared) EventType.SHARED else EventType.USED
+                val id = dao.insert(Event(itemId = item.id, type = type.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount))
+                onLogged(id, amount)
+            }
+        }
+    }
+
+    /** What a quick ＋ changed, so Undo can put everything back. */
+    data class QuickBuy(val eventId: Long, val amount: Double, val itemId: Long, val wasRefill: Boolean, val wasHidden: Boolean)
+
+    /**
+     * The quick ＋: one more (or your usual pack size for kilos and litres), today, at last
+     * time's shop and price.
+     */
+    fun quickBuy(state: PantryState, item: Item, onLogged: (QuickBuy) -> Unit) {
+        val entries = state.entries(item.id)
+        val amount = Pantry.buyAmount(item.unitValue(), entries)
+        val price = Pantry.expectedPriceMinor(item.unitValue(), entries)
+        val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
+        viewModelScope.launch {
+            tapLock.withLock {
+                val id = dao.insert(
+                    Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount, priceMinor = price, shop = shop),
+                )
+                dao.clearRefill(item.id)
+                onLogged(QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList))
+            }
+        }
+    }
+
+    fun undoBuy(buy: QuickBuy) {
+        viewModelScope.launch {
+            dao.deleteEvent(buy.eventId)
+            val current = dao.item(buy.itemId) ?: return@launch
+            dao.update(current.copy(refillNeeded = buy.wasRefill, hiddenFromList = buy.wasHidden))
+        }
+    }
+
+    /**
+     * Adds a line to the shopping list. If it matches a pantry item's name, that item is marked
+     * "refill needed" instead, so it isn't listed twice. Returns through [onAdded] whether a
+     * pantry item was used.
+     */
+    fun addNote(text: String, state: PantryState, onAdded: (matchedItem: Boolean) -> Unit = {}) {
+        val clean = text.trim().take(80)
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            val match = state.items.firstOrNull { it.name.equals(clean, ignoreCase = true) }
+            if (match != null) {
+                dao.update((dao.item(match.id) ?: match).copy(refillNeeded = true, hiddenFromList = false))
+            } else {
+                dao.insert(ShoppingNote(text = clean))
+            }
+            onAdded(match != null)
+        }
+    }
+
+    fun deleteNote(note: ShoppingNote) {
+        viewModelScope.launch { dao.deleteNote(note.id) }
+    }
+
+    fun restoreNote(note: ShoppingNote) {
+        viewModelScope.launch { dao.insert(note.copy(id = 0)) }
     }
 
     /** Logs a quick change and returns its id through [onLogged], so it can be undone. */
@@ -108,17 +197,6 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             if (type == EventType.BOUGHT) dao.clearRefill(itemId)
             onLogged(id)
         }
-    }
-
-    /**
-     * The quick "+" button: one more, today, at the same shop and unit price as last time.
-     * Returns nothing; [onLogged] gets the new event's id for Undo.
-     */
-    fun quickBuy(state: PantryState, itemId: Long, onLogged: (Long) -> Unit) {
-        val last = Pantry.lastPriced(state.entries(itemId))
-        val lastShop = Pantry.lastBought(state.entries(itemId))?.shop ?: ""
-        val price = last?.let { Pantry.unitPriceMinor(it) }?.let { Pantry.totalMinor(it, 1.0) }
-        log(itemId, EventType.BOUGHT, 1.0, price, last?.shop ?: lastShop, onLogged)
     }
 
     fun saveEvent(event: Event, replacedReceipt: String) {
@@ -150,7 +228,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun exportTo(uri: Uri): Int = withContext(Dispatchers.IO) {
         val items = dao.items()
-        val text = Backup.encode(items, dao.events())
+        val text = Backup.encode(items, dao.events(), dao.notes())
         getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
             ?: throw IllegalStateException("Couldn't write the file")
         items.size
@@ -165,6 +243,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 val events = contents.events.filter { it.itemId == item.id }
                 dao.insertItemWithEvents(item.copy(id = 0), events)
             }
+            contents.notes.forEach { dao.insert(it.copy(id = 0)) }
         }
         contents.items.size
     }
@@ -181,7 +260,10 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             val s = EventType.SHARED
             suspend fun add(name: String, category: String, unit: QtyUnit, life: Life, vararg events: Event, lowAt: Double = 1.0, refill: Boolean = false) {
                 db.withTransaction {
-                    dao.insertItemWithEvents(Item(name = name, category = category, unit = unit.name, life = life.name, lowAt = lowAt, refillNeeded = refill), events.toList())
+                    dao.insertItemWithEvents(
+                        Item(name = name, category = category, unit = unit.name, life = life.name, lowAt = lowAt, refillNeeded = refill, step = Pantry.defaultStep(unit)),
+                        events.toList(),
+                    )
                 }
             }
             add("Bread", "Bread & bakery", QtyUnit.PACKET, Life.SHORT,
@@ -201,6 +283,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             add("Eggs", "Dairy & eggs", QtyUnit.BOX, Life.MEDIUM, ev(b, 5, 1.0, 289, "IKI"))
             add("Toothpaste", "Toiletries", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
             add("Dish soap", "Cleaning", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
+            dao.insert(ShoppingNote(text = "Birthday candles"))
+            dao.insert(ShoppingNote(text = "Aluminium foil"))
         }
     }
 }

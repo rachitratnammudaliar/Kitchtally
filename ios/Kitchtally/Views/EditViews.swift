@@ -10,6 +10,7 @@ struct EditItemView: View {
     @State private var unit: QtyUnit
     @State private var life: Life
     @State private var lowAt: String
+    @State private var stepText: String
     @State private var stockText: String
     @State private var refill: Bool
     @State private var notes: String
@@ -24,6 +25,7 @@ struct EditItemView: View {
         _unit = State(initialValue: existing?.unitValue ?? .PACKET)
         _life = State(initialValue: existing?.lifeValue ?? .MEDIUM)
         _lowAt = State(initialValue: Qty.format(existing?.lowAt ?? 1))
+        _stepText = State(initialValue: existing.map { Qty.format($0.step) } ?? "")
         _stockText = State(initialValue: "")
         _refill = State(initialValue: existing?.refillNeeded ?? false)
         _notes = State(initialValue: existing?.notes ?? "")
@@ -38,7 +40,12 @@ struct EditItemView: View {
     }
 
     private var nameError: Bool { name.trimmingCharacters(in: .whitespaces).isEmpty }
-    private var invalid: Bool { nameError || number(lowAt) == nil || number(stockText) == nil || category.isEmpty }
+    private var stepValue: Double? { stepText.trimmingCharacters(in: .whitespaces).isEmpty ? Pantry.defaultStep(unit) : Qty.parse(stepText) }
+    private var duplicate: Bool {
+        let n = name.trimmingCharacters(in: .whitespaces).lowercased()
+        return !n.isEmpty && store.items.contains { $0.id != existing?.id && $0.name.trimmingCharacters(in: .whitespaces).lowercased() == n }
+    }
+    private var invalid: Bool { nameError || number(lowAt) == nil || number(stockText) == nil || stepValue == nil || category.isEmpty }
 
     private func save() {
         if invalid {
@@ -54,10 +61,14 @@ struct EditItemView: View {
         item.refillNeeded = refill
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.photoFile = photo
+        item.step = stepValue ?? 1
         let target = number(stockText) ?? 0
         if let e = existing {
-            let diff = Qty.round(target - max(0, store.stock(e.id)))
-            if diff != 0 { store.log(e.id, .ADJUST, quantity: diff) }
+            // An empty "amount now" keeps the current amount.
+            if !stockText.trimmingCharacters(in: .whitespaces).isEmpty {
+                let diff = Qty.round(target - max(0, store.stock(e.id)))
+                if diff != 0 { store.log(e.id, .ADJUST, quantity: diff) }
+            }
             store.saveItem(item)
         } else {
             store.saveItem(item, startStock: target)
@@ -86,6 +97,7 @@ struct EditItemView: View {
                     }
                     TextField("Name, e.g. Basmati rice", text: $name)
                     if showErrors && nameError { Text("Enter a name").font(.caption).foregroundColor(.red) }
+                    if duplicate { Text("You already have an item called this. You can still save it.").font(.caption).foregroundColor(.orange) }
                 }
 
                 Section("Category") {
@@ -123,12 +135,18 @@ struct EditItemView: View {
                         TextField("1", text: $lowAt).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                         Text(unit.plural).foregroundColor(.secondary)
                     }
-                    if showErrors && (number(lowAt) == nil || number(stockText) == nil) {
+                    HStack {
+                        Text("Each − or Shared uses")
+                        Spacer()
+                        TextField(Qty.format(Pantry.defaultStep(unit)), text: $stepText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
+                        Text(unit.plural).foregroundColor(.secondary)
+                    }
+                    if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil) {
                         Text("Use a number, 0 or more").font(.caption).foregroundColor(.red)
                     }
                     Toggle("Refill needed", isOn: $refill)
                 } footer: {
-                    Text(existing == nil ? "It goes on the shopping list at or below \"running low at\"." : "Leave \"amount now\" empty to keep the current amount.")
+                    Text("It goes on the shopping list at or below \"running low at\". \"Each − uses\" is, for example, 0.5 kg of rice per meal." + (existing == nil ? "" : " Leave \"amount now\" empty to keep the current amount."))
                 }
 
                 Section {
@@ -235,7 +253,7 @@ struct PurchaseView: View {
                         TextField("1", text: $qtyText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                     }
                     if showErrors && qty == nil { Text("Enter an amount above 0").font(.caption).foregroundColor(.red) }
-                    DatePicker("Bought on", selection: $date, displayedComponents: .date)
+                    DatePicker("Bought on", selection: $date, in: ...Date(), displayedComponents: .date)
                 }
 
                 Section("Price (optional)") {
