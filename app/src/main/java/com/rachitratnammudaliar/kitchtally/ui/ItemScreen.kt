@@ -164,8 +164,8 @@ fun ItemScreen(
                     InfoRow("Running low at", unit.label(item.lowAt))
                     Pantry.dailyUse(entries, today)?.let { rate ->
                         HorizontalDivider()
-                        val perWeek = Qty.format(rate * 7)
-                        InfoRow("You use", "about $perWeek ${if (rate * 7 == 1.0) unit.singular else unit.plural} a week")
+                        val perWeek = Qty.approx(rate * 7)
+                        InfoRow("You use", "about $perWeek ${if (perWeek == "1") unit.singular else unit.plural} a week")
                     }
                     if (lastPriced != null) {
                         HorizontalDivider()

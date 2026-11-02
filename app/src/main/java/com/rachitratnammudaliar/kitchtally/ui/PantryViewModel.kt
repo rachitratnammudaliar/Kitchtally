@@ -185,15 +185,15 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             add("Bread", "Bread & bakery", QtyUnit.PACKET, Life.SHORT,
-                ev(b, 12, 2.0, 178, "IKI"), ev(u, 11), ev(u, 9), ev(b, 7, 2.0, 178, "IKI"), ev(u, 6), ev(s, 4), ev(b, 3, 2.0, 178, "Norfa"), ev(u, 1))
+                ev(b, 12, 2.0, 178, "IKI"), ev(u, 11), ev(u, 9), ev(b, 7, 2.0, 178, "IKI"), ev(u, 6), ev(s, 4), ev(b, 3, 2.0, 178, "Norfa"), ev(u, 1), ev(b, 0, 2.0, 178, "IKI"), ev(u, 0), ev(s, 0))
             add("Milk", "Dairy & eggs", QtyUnit.BOTTLE, Life.SHORT,
-                ev(b, 9, 2.0, 198, "Maxima"), ev(u, 7), ev(u, 3), ev(b, 2, 1.0, 99, "IKI"), ev(u, 1))
+                ev(b, 9, 2.0, 198, "Maxima"), ev(u, 7), ev(u, 3), ev(b, 2, 1.0, 99, "IKI"), ev(u, 1), ev(b, 0, 2.0, 198, "IKI"), ev(u, 0))
             add("Basmati rice", "Grains & flour", QtyUnit.KG, Life.LONG,
                 ev(b, 20, 5.0, 1245, "Maxima"), ev(u, 15, 0.5), ev(u, 10, 0.5), ev(s, 4, 1.0), ev(u, 2, 0.5))
             add("Atta (wheat flour)", "Grains & flour", QtyUnit.KG, Life.LONG,
                 ev(b, 25, 5.0, 899, "Lidl"), ev(u, 18), ev(u, 9), ev(s, 4))
             add("Tomatoes", "Fruit & veg", QtyUnit.KG, Life.SHORT,
-                ev(b, 6, 1.0, 249, "Lidl"), ev(u, 4, 0.5), ev(s, 2, 0.5))
+                ev(b, 6, 1.0, 249, "Lidl"), ev(u, 4, 0.5), ev(s, 2, 0.5), ev(b, 0, 1.0, 239, "Lidl"), ev(s, 0, 0.5))
             add("Onions", "Fruit & veg", QtyUnit.KG, Life.MEDIUM,
                 ev(b, 14, 2.0, 138, "Norfa"), ev(u, 10, 0.5), ev(u, 6, 0.5), ev(u, 2, 0.5))
             add("Spaghetti", "Groceries", QtyUnit.PACKET, Life.LONG,

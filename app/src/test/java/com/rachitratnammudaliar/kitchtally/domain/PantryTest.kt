@@ -84,6 +84,8 @@ class PantryTest {
     fun quantitiesAndMoney() {
         assertEquals("1.5", Qty.format(1.5))
         assertEquals("2", Qty.format(2.0))
+        assertEquals("3", Qty.approx(2.917))
+        assertEquals("0.5", Qty.approx(0.46))
         assertEquals(0.5, Qty.parse("0,5")!!, 0.0)
         assertNull(Qty.parse("0"))
         assertNull(Qty.parse("abc"))

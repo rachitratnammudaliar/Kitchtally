@@ -1,3 +1,103 @@
 # Kitchtally
 
-Work in progress.
+**An offline pantry tracker for Android and iPhone. Know what's at home, what's running out, and what you spend each week.**
+
+Rice, atta, bread, onions, shampoo: add the things you keep at home, tap **＋** when you buy more, **−** when you use some, and **Shared** when you cook for friends. Kitchtally counts what's left, warns you before it runs out, builds your shopping list and shows a weekly summary. Your data never leaves your phone: no internet, no account, no ads and no tracking.
+
+<p>
+  <img src="docs/screenshots/home.png" width="200" alt="Pantry with stock counts and quick buttons">
+  <img src="docs/screenshots/item.png" width="200" alt="Item details with history and prices">
+  <img src="docs/screenshots/shopping.png" width="200" alt="Shopping list">
+  <img src="docs/screenshots/week.png" width="200" alt="Weekly summary">
+</p>
+
+## Install
+
+Download from **[Releases](../../releases/latest)**. Kitchtally isn't in an app store yet, so your phone asks you to confirm the first time.
+
+| Device | File | Requires |
+|---|---|---|
+| Android | `Kitchtally-x.y.z-Android.apk` | Android 8.0+ |
+| iPhone, iPad | `Kitchtally-x.y.z-iOS.ipa` | iOS 16+, installed with a sideloading tool |
+
+<details>
+<summary><b>Android</b></summary>
+
+1. Download the APK on your phone and open it. If Android asks, allow your browser or Files app to **install unknown apps**.
+2. If Play Protect warns about an unknown developer, tap **More details → Install anyway**.
+3. **Samsung Galaxy (One UI 6+):** if the install is blocked, turn off **Settings → Security and privacy → Auto Blocker**, install, then turn it back on.
+
+Updates install over the old version and keep your data.
+</details>
+
+<details>
+<summary><b>iPhone and iPad</b></summary>
+
+1. On a Windows PC or Mac, install **[Sideloadly](https://sideloadly.io)** or **[AltStore](https://altstore.io)**.
+2. Connect your iPhone, drag in `Kitchtally-x.y.z-iOS.ipa`, and sign in with your Apple ID.
+3. On the iPhone, open **Settings → General → VPN & Device Management**, tap your Apple ID and choose **Trust**. Also turn on **Settings → Privacy & Security → Developer Mode**.
+
+With a free Apple ID the app must be refreshed every 7 days (AltStore does this automatically). Your data stays on the phone.
+</details>
+
+## Features
+
+**Pantry**
+- Items with a photo (camera or gallery), category, unit (pieces, packets, bottles, boxes, bags, kg, litres) and how long they last: short (bread, milk), medium (onions, eggs) or long (rice, atta, pasta)
+- **＋** adds one more, logged as refilled today at last time's shop and price. **−** uses one. **Shared** uses one cooked for friends; it counts quantity only, never money
+- Every quick action can be undone
+- Stock pills: green when there's enough, amber when running low, red when out
+- "About 4 days left", worked out from how fast you've been using it
+- "Check it's fresh" for short-life items bought a while ago
+
+**Purchases**
+- Quantity, date, total paid **or** price per kg / per packet (it works out the other), shop and an optional receipt photo
+- Shops: IKI, Norfa, Maxima, Lidl, Rimi, Pepco, or type your own; it's remembered for next time
+- Last price and shop shown on each item
+
+**Shopping list**
+- Everything that's out, running low (at or below your "running low at" amount, or likely to run out within 2 days), or marked **Refill needed**
+- Tap **Bought** in the shop, and an estimate of the total at last prices
+
+**Weekly summary** (Monday to Sunday)
+- Money spent, compared with the week before, and spent by category
+- Used and shared per item: "Bread: used 3 packets (1 shared), bought 2"
+- Go back to any earlier week
+
+**Categories:** Groceries, Fruit & veg, Bread & bakery, Dairy & eggs, Grains & flour, Spices, Snacks, Drinks, Toiletries, Cleaning, Other, or your own.
+
+**Backup:** export to a file and import it on a new phone, Android or iPhone. Photos stay on the phone.
+
+## Privacy
+
+| | |
+|---|---|
+| Internet | None. The Android build fails if the app ever asks for internet access |
+| Storage | Only on your phone, in the app's private storage |
+| Cloud backup | Disabled on Android |
+| Photos | Resized and kept in the app's private storage |
+
+See [PRIVACY.md](PRIVACY.md).
+
+## How it's built
+
+| Platform | Built with |
+|---|---|
+| Android | Kotlin, Jetpack Compose, Material 3, Room |
+| iPhone, iPad | Swift and SwiftUI, a port of the same logic with the same unit tests |
+
+Unit tests cover stock counting, running-low and days-left estimates, prices per kg, weekly summaries and backups. They run for Android and on an iPhone simulator for every change. Raising the number in `version.txt` builds both apps on GitHub Actions and publishes them together. The screenshots are taken by a robot that opens the app with sample data in an Android emulator.
+
+```
+app/   Android app
+ios/   iPhone and iPad app (XcodeGen project)
+```
+
+```bash
+./gradlew :app:assembleDebug                                    # Android (JDK 17, Android SDK)
+cd ios && xcodegen generate && open Kitchtally.xcodeproj        # iOS (macOS, Xcode 15+)
+```
+
+## Licence
+
+MIT © 2026 Rachit Ratnam Mudaliar

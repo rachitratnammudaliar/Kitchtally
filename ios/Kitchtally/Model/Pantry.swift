@@ -95,6 +95,27 @@ enum Categories {
         "Groceries", "Fruit & veg", "Bread & bakery", "Dairy & eggs", "Grains & flour",
         "Spices", "Snacks", "Drinks", "Toiletries", "Cleaning", "Other",
     ]
+
+    private static let emoji: [String: String] = [
+        "groceries": "🛒", "fruit & veg": "🥕", "bread & bakery": "🍞", "dairy & eggs": "🥛",
+        "grains & flour": "🌾", "spices": "🌶️", "snacks": "🍪", "drinks": "🥤",
+        "toiletries": "🧴", "cleaning": "🧽", "other": "📦",
+    ]
+
+    static func emojiFor(_ category: String) -> String {
+        emoji[category.trimmingCharacters(in: .whitespaces).lowercased()] ?? "🫙"
+    }
+
+    /// Presets in order, then the user's own alphabetically.
+    static func ordered(_ used: [String]) -> [String] {
+        let lowered = Set(used.map { $0.lowercased() })
+        var seen = Set<String>()
+        var custom: [String] = []
+        for c in used where !presets.contains(where: { $0.lowercased() == c.lowercased() }) {
+            if seen.insert(c.lowercased()).inserted { custom.append(c) }
+        }
+        return presets.filter { lowered.contains($0.lowercased()) } + custom.sorted { $0.lowercased() < $1.lowercased() }
+    }
 }
 
 enum Shops {
@@ -120,6 +141,11 @@ enum Qty {
         while s.hasSuffix("0") { s.removeLast() }
         if s.hasSuffix(".") { s.removeLast() }
         return s
+    }
+
+    /// Rounded for estimates: whole numbers from 2 up, otherwise one decimal.
+    static func approx(_ q: Double) -> String {
+        q >= 2 ? String(Int64(q.rounded())) : format((q * 10).rounded() / 10)
     }
 
     static func parse(_ text: String) -> Double? {

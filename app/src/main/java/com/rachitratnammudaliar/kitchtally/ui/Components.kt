@@ -75,15 +75,8 @@ private val Dark = darkColorScheme(
 @Composable
 fun KitchtallyTheme(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        dark -> Dark
-        else -> Light
-    }
-    MaterialTheme(colorScheme = colors, content = content)
+    // Always Kitchtally's own green, not the phone's wallpaper colours.
+    MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
 }
 
 val dateFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM yyyy")

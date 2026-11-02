@@ -99,6 +99,10 @@ object Qty {
     fun format(q: Double): String =
         BigDecimal.valueOf(round(q)).stripTrailingZeros().toPlainString().let { if (it == "-0") "0" else it }
 
+    /** Rounded for estimates: whole numbers from 2 up, otherwise one decimal. "about 3", "about 0.5". */
+    fun approx(q: Double): String =
+        if (q >= 2) Math.round(q).toString() else format(BigDecimal.valueOf(q).setScale(1, RoundingMode.HALF_UP).toDouble())
+
     /** "1", "0.5", "1,5" -> quantity. Null if not a positive number up to 10,000. */
     fun parse(text: String): Double? {
         val v = text.trim().replace(',', '.').toDoubleOrNull() ?: return null
