@@ -143,10 +143,15 @@ object Pantry {
     fun expectedPriceMinor(unit: QtyUnit, entries: List<Entry>, packSize: Double = 0.0): Long? =
         priceFor(entries, buyAmount(unit, entries, packSize))
 
-    /** The price of [quantity] at the last unit price paid, or null if no price is known. */
+    /**
+     * The price of [quantity] at the last price paid, worked out from the whole purchase and
+     * rounded once: a pack of 10 eggs for €2.89 is €2.89, not 10 × €0.29.
+     */
     fun priceFor(entries: List<Entry>, quantity: Double): Long? {
-        val unitPrice = lastPriced(entries)?.let { unitPriceMinor(it) } ?: return null
-        return totalMinor(unitPrice, quantity)
+        val last = lastPriced(entries) ?: return null
+        val paid = last.priceMinor ?: return null
+        return BigDecimal.valueOf(paid).multiply(BigDecimal.valueOf(quantity))
+            .divide(BigDecimal.valueOf(last.quantity), 0, RoundingMode.HALF_UP).toLong()
     }
 
     /** "1 pack = 10 pieces", or "" if not bought in packs. */

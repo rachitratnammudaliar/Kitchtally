@@ -184,10 +184,10 @@ enum Pantry {
         priceFor(entries, buyAmount(unit, entries, packSize: packSize))
     }
 
-    /// The price of [quantity] at the last unit price paid.
+    /// The price of [quantity] at the last price paid, from the whole purchase and rounded once.
     static func priceFor(_ entries: [Entry], _ quantity: Double) -> Int64? {
-        guard let last = lastPriced(entries), let unitPrice = unitPriceMinor(last) else { return nil }
-        return totalMinor(unitPrice, quantity)
+        guard let last = lastPriced(entries), let paid = last.priceMinor, last.quantity > 0 else { return nil }
+        return Int64((Double(paid) * quantity / last.quantity).rounded(.toNearestOrAwayFromZero))
     }
 
     static func packLabel(_ unit: QtyUnit, _ packSize: Double) -> String {
