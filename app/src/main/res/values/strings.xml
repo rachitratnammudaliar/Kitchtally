@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Kitchtally</string>
+    <string name="widget_loading">To buy</string>
+    <string name="widget_description">What\'s on your To buy list and what\'s almost out</string>
 </resources>

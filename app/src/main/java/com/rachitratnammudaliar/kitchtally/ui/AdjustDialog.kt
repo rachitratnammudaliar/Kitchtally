@@ -43,6 +43,10 @@ fun AdjustDialog(item: Item, stock: Double, onDismiss: () -> Unit, onAction: (Pa
         text = Qty.format(next)
     }
 
+    if (unit.isLevel) {
+        LevelDialog(item, stock, onDismiss, onAction)
+        return
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(item.name) },
@@ -80,6 +84,43 @@ fun AdjustDialog(item: Item, stock: Double, onDismiss: () -> Unit, onAction: (Pa
                     Text(if (amount != null) "Set what's left to ${unit.label(amount)}" else "Set what's left", textAlign = TextAlign.Center)
                 }
                 Hint("Used and Shared never take more than what's left.")
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/** For % items: tap how full it is now, or type an exact %. */
+@Composable
+private fun LevelDialog(item: Item, stock: Double, onDismiss: () -> Unit, onAction: (PantryViewModel.Adjust, Double) -> Unit) {
+    val unit = item.unitValue()
+    var text by rememberSaveable { mutableStateOf(Qty.percent(stock.coerceAtLeast(0.0)).toString()) }
+    val percent = text.trim().toIntOrNull()?.takeIf { it in 0..1000 }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(item.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Now: ${stockLabel(item, stock)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SectionLabel("How much is left?")
+                ChipRow(listOf(100, 75, 50, 25, 0), null, { if (it == 0) "Empty" else "$it%" }, { onAction(PantryViewModel.Adjust.SET, it / 100.0) })
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumberField(
+                        value = text,
+                        onChange = { text = it.filter { c -> c.isDigit() }.take(4) },
+                        label = "Exact %",
+                        isError = percent == null,
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilledTonalButton(onClick = { onAction(PantryViewModel.Adjust.SET, (percent ?: 0) / 100.0) }, enabled = percent != null) { Text("Set") }
+                }
+                Hint("Over 100% means more than one: 150% is one full and one half.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { onAction(PantryViewModel.Adjust.USED, item.step) }, enabled = stock > 0, modifier = Modifier.weight(1f)) {
+                        Text("Used ${unit.label(item.step)}")
+                    }
+                    Button(onClick = { onAction(PantryViewModel.Adjust.BOUGHT, 1.0) }, modifier = Modifier.weight(1f)) { Text("Bought a new one") }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

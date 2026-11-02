@@ -39,7 +39,7 @@ class MigrationTest {
             db.version = 1
         }
 
-        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
         try {
             runBlocking {
                 val dao = room.pantry()
@@ -50,6 +50,12 @@ class MigrationTest {
                 assertEquals(false, items.getValue("Rice").hiddenFromList)
                 assertEquals(false, items.getValue("Rice").unsure)
                 assertEquals(0.0, items.getValue("Rice").packSize, 0.0)
+                assertEquals(false, items.getValue("Rice").countMeals)
+                assertEquals(0.0, items.getValue("Rice").mealsPerUnit, 0.0)
+                assertEquals(false, items.getValue("Rice").lowInMeals)
+                // New columns can be written after the upgrade.
+                dao.update(items.getValue("Rice").copy(countMeals = true, mealsPerUnit = 6.0))
+                assertEquals(6.0, dao.item(items.getValue("Rice").id)!!.mealsPerUnit, 0.0)
                 assertEquals(true, items.getValue("Bread").refillNeeded)
                 assertEquals("5 kg bag", items.getValue("Rice").notes)
                 assertEquals("Staples", items.getValue("Rice").category)

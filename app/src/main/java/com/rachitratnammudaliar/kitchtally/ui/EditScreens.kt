@@ -54,6 +54,7 @@ import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
+import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
@@ -141,6 +142,11 @@ private fun NamedChoice(options: List<String>, selected: String, onSelect: (Stri
 
 /* ============================ Add / edit item ============================ */
 
+/** % items are typed as percentages (25) but stored as a fraction of one (0.25). */
+private fun toDisplay(unit: QtyUnit, value: Double): String = if (unit.isLevel) Qty.percent(value).toString() else Qty.format(value)
+
+private fun fromDisplay(unit: QtyUnit, value: Double): Double = if (unit.isLevel) Qty.round(value / 100.0) else value
+
 @Composable
 fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (savedId: Long) -> Unit) {
     val snackbar = remember { SnackbarHostState() }
@@ -155,6 +161,8 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var unitTouched by rememberSaveable { mutableStateOf(!isNew) }
     var lifeTouched by rememberSaveable { mutableStateOf(!isNew) }
     var packTouched by rememberSaveable { mutableStateOf(!isNew) }
+    var mealsTouched by rememberSaveable { mutableStateOf(!isNew) }
+    var lowTouched by rememberSaveable { mutableStateOf(!isNew) }
     var unit by rememberSaveable { mutableStateOf(QtyUnit.PACKET.name) }
     var life by rememberSaveable { mutableStateOf(Life.MEDIUM.name) }
     var lowAt by rememberSaveable { mutableStateOf("1") }
@@ -163,6 +171,9 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var stockText by rememberSaveable { mutableStateOf("") }
     var refill by rememberSaveable { mutableStateOf(false) }
     var unsure by rememberSaveable { mutableStateOf(false) }
+    var countMeals by rememberSaveable { mutableStateOf(false) }
+    var mealsText by rememberSaveable { mutableStateOf("") }
+    var lowInMeals by rememberSaveable { mutableStateOf(false) }
     var notes by rememberSaveable { mutableStateOf("") }
     var photo by rememberSaveable { mutableStateOf("") }
     var originalPhoto by rememberSaveable { mutableStateOf("") }
@@ -174,10 +185,14 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             category = existing.category
             unit = existing.unit
             life = existing.life
-            lowAt = Qty.format(existing.lowAt)
-            stepText = Qty.format(existing.step)
+            val u = existing.unitValue()
+            lowAt = if (existing.lowInMeals) Qty.format(existing.lowAt) else toDisplay(u, existing.lowAt)
+            stepText = toDisplay(u, existing.step)
             packText = if (existing.packSize > 0) Qty.format(existing.packSize) else ""
-            stockText = Qty.format(maxOf(0.0, state?.stock(existing.id) ?: 0.0))
+            stockText = toDisplay(u, maxOf(0.0, state?.stock(existing.id) ?: 0.0))
+            countMeals = existing.countMeals
+            lowInMeals = existing.lowInMeals
+            mealsText = if (existing.mealsPerUnit > 0) Qty.format(Qty.round(existing.mealsPerUnit * (if (existing.packSize > 0) existing.packSize else 1.0))) else ""
             refill = existing.refillNeeded
             unsure = existing.unsure
             notes = existing.notes
@@ -187,13 +202,29 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
         }
     }
 
+    val unitNow = QtyUnit.fromName(unit)
+    val lowInMealsNow = lowInMeals && countMeals
     val lowAtValue = lowAt.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
-    val stockValue = if (stockText.isBlank()) 0.0 else stockText.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
-    val stepValue = if (stepText.isBlank()) Pantry.defaultStep(QtyUnit.fromName(unit)) else Qty.parse(stepText)
-    val packValue = if (packText.isBlank()) 0.0 else Qty.parse(packText)
+        ?.let { if (lowInMealsNow) it else fromDisplay(unitNow, it) }
+    val stockValue = if (stockText.isBlank()) 0.0 else stockText.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }?.let { fromDisplay(unitNow, it) }
+    val stepValue = if (stepText.isBlank()) Pantry.defaultStep(unitNow) else Qty.parse(stepText)?.let { fromDisplay(unitNow, it) }
+    val packValue = if (packText.isBlank() || unitNow.isLevel) 0.0 else Qty.parse(packText)
+    val mealsValue = if (!countMeals || mealsText.isBlank()) 0.0 else Qty.parse(mealsText)
+
+    /** Switching between % and other units converts what's typed; "running low at" follows unless you set it. */
+    fun changeUnit(next: QtyUnit) {
+        val old = QtyUnit.fromName(unit)
+        if (old.isLevel != next.isLevel) {
+            fun convert(text: String) = text.trim().replace(',', '.').toDoubleOrNull()?.let { toDisplay(next, fromDisplay(old, it)) } ?: text
+            stockText = convert(stockText)
+            stepText = ""
+        }
+        if (!lowInMealsNow) lowAt = if (lowTouched && old.isLevel == next.isLevel) lowAt else toDisplay(next, Pantry.defaultLowAt(next))
+        unit = next.name
+    }
     val nameError = name.isBlank()
     val duplicate = name.isNotBlank() && state?.items?.any { it.id != id && it.name.trim().equals(name.trim(), ignoreCase = true) } == true
-    val invalid = nameError || lowAtValue == null || stockValue == null || stepValue == null || packValue == null || category.isBlank()
+    val invalid = nameError || lowAtValue == null || stockValue == null || stepValue == null || packValue == null || mealsValue == null || category.isBlank()
 
     fun leave(savedId: Long) {
         if (savedId == 0L && photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
@@ -218,6 +249,9 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             photoFile = photo,
             step = stepValue ?: 1.0,
             packSize = packValue ?: 0.0,
+            countMeals = countMeals,
+            mealsPerUnit = (mealsValue ?: 0.0).let { m -> if (m > 0) Qty.round(m / (if ((packValue ?: 0.0) > 0) packValue!! else 1.0)) else 0.0 },
+            lowInMeals = lowInMealsNow,
         )
         val target = Qty.round(stockValue ?: 0.0)
         if (existing == null) {
@@ -269,9 +303,10 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
                     if (isNew) {
                         val guess = Suggestions.forName(name)
                         if (!categoryTouched) category = guess?.category ?: "Other"
-                        if (!unitTouched) unit = (guess?.unit ?: QtyUnit.PACKET).name
+                        if (!unitTouched) changeUnit(guess?.unit ?: QtyUnit.PACKET)
                         if (!lifeTouched) life = (guess?.life ?: Life.MEDIUM).name
                         if (!packTouched) packText = guess?.packSize?.takeIf { it > 0 }?.let { Qty.format(it) } ?: ""
+                        if (!mealsTouched) countMeals = guess?.countMeals ?: false
                     }
                 },
                 label = { Text("Name") },
@@ -298,51 +333,93 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             if (showErrors && category.isBlank()) Hint("Choose or type a category", error = true)
 
             SectionLabel("Counted in")
-            ChipRow(QtyUnit.entries, QtyUnit.fromName(unit), { it.plural.replaceFirstChar { c -> c.uppercase() } }, { unit = it.name; unitTouched = true })
+            ChipRow(QtyUnit.entries, unitNow, { it.title }, { changeUnit(it); unitTouched = true })
+            if (unitNow.isLevel) Hint("Shows how full it is: 100%, 75%, 50%, 25%. Good for bread, oil, sauces and opened packets.")
+            if (unitNow.priceDivisor > 1) Hint("Prices are still shown ${unitNow.priceLabel}.")
 
             SectionLabel("How long it lasts")
             ChipRow(Life.entries, Life.fromName(life), { it.label }, { life = it.name; lifeTouched = true })
             Hint(Life.fromName(life).description)
 
-            val unitValue = QtyUnit.fromName(unit)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberField(
-                    value = stockText,
-                    onChange = { stockText = it },
-                    label = if (isNew) "You have now" else "Amount now",
-                    placeholder = "0",
-                    isError = showErrors && stockValue == null,
-                    error = "A number, 0 or more",
-                    modifier = Modifier.weight(1f),
-                )
-                NumberField(
-                    value = lowAt,
-                    onChange = { lowAt = it },
-                    label = "Running low at",
-                    isError = showErrors && lowAtValue == null,
-                    error = "A number, 0 or more",
-                    modifier = Modifier.weight(1f),
-                )
+            val inUnit = if (unitNow.isLevel) "%" else unitNow.plural
+            NumberField(
+                value = stockText,
+                onChange = { stockText = it },
+                label = (if (isNew) "You have now" else "Amount now") + " ($inUnit)",
+                placeholder = "0",
+                isError = showErrors && stockValue == null,
+                error = "A number, 0 or more",
+            )
+            if (unitNow.isLevel) ChipRow(listOf(100, 75, 50, 25, 0), stockText.toIntOrNull(), { if (it == 0) "Empty" else "$it%" }, { stockText = it.toString() })
+
+            SwitchRow("Count meals", "Shows how many meals are left. Leave it off for salt, oil, spices and the like.", countMeals) {
+                countMeals = it
+                mealsTouched = true
+                if (!it && lowInMeals) {
+                    lowInMeals = false
+                    lowAt = toDisplay(unitNow, Pantry.defaultLowAt(unitNow))
+                }
             }
-            Hint("In ${unitValue.plural}. It goes on the shopping list at or below \"running low at\".")
+            if (countMeals) {
+                val per = when {
+                    (packValue ?: 0.0) > 0 -> "1 pack"
+                    unitNow.isLevel -> "A full one"
+                    else -> "1 ${unitNow.singular}"
+                }
+                NumberField(
+                    value = mealsText,
+                    onChange = { mealsText = it },
+                    label = "$per makes about … meals",
+                    placeholder = "e.g. 4",
+                    isError = showErrors && mealsValue == null,
+                    error = "A number above 0, or leave it empty",
+                )
+                Hint("A packet of spaghetti might make 4 meals, one potato about half a meal (0.5). You can also fill it in when you buy: Price & shop asks how many meals.")
+            }
+
+            SectionLabel("Running low at")
+            if (countMeals) {
+                ChipRow(listOf(true, false), lowInMealsNow, { if (it) "In meals" else if (unitNow.isLevel) "In %" else "In ${unitNow.plural}" }, { inMeals ->
+                    if (inMeals != lowInMeals) {
+                        lowInMeals = inMeals
+                        lowAt = if (inMeals) Qty.format(Pantry.DEFAULT_LOW_MEALS) else toDisplay(unitNow, Pantry.defaultLowAt(unitNow))
+                    }
+                })
+            }
+            NumberField(
+                value = lowAt,
+                onChange = { lowAt = it; lowTouched = true },
+                label = "Running low at (${if (lowInMealsNow) "meals" else inUnit})",
+                isError = showErrors && lowAtValue == null,
+                error = "A number, 0 or more",
+            )
+            Hint(
+                if (lowInMealsNow) "It says \"almost out\" and goes on To buy at this many meals. It turns red at 1 meal."
+                else "It says \"almost out\" and goes on To buy at or below this." + if (countMeals) " It turns red at 1 meal." else "",
+            )
             NumberField(
                 value = stepText,
                 onChange = { stepText = it },
-                label = "Each − or Shared uses",
-                placeholder = Qty.format(Pantry.defaultStep(unitValue)),
+                label = "Each − or Shared uses ($inUnit)",
+                placeholder = toDisplay(unitNow, Pantry.defaultStep(unitNow)),
                 isError = showErrors && stepValue == null,
                 error = "An amount above 0",
             )
-            Hint("For example 0.5 kg of rice per meal, or 1 packet of bread. Leave it empty for ${unitValue.label(Pantry.defaultStep(unitValue))}.")
-            NumberField(
-                value = packText,
-                onChange = { packText = it; packTouched = true },
-                label = "Comes in packs of (optional)",
-                placeholder = "e.g. 10",
-                isError = showErrors && packValue == null,
-                error = "An amount above 0, or leave it empty",
+            Hint(
+                if (unitNow.isLevel) "Leave it empty for 25%. For oil you might use 5 or 10."
+                else "For example 0.5 kg of rice per meal, or 1 packet of bread. Leave it empty for ${unitNow.label(Pantry.defaultStep(unitNow))}.",
             )
-            Hint("Eggs: count them in pieces and set packs of 10. Then ＋ adds a whole pack and − takes one egg.")
+            if (!unitNow.isLevel) {
+                NumberField(
+                    value = packText,
+                    onChange = { packText = it; packTouched = true },
+                    label = "Comes in packs of (optional)",
+                    placeholder = "e.g. 10",
+                    isError = showErrors && packValue == null,
+                    error = "An amount above 0, or leave it empty",
+                )
+                Hint("Eggs: count them in pieces and set packs of 10. Then ＋ adds a whole pack and − takes one egg.")
+            }
 
             SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it; if (it) unsure = false }
             SwitchRow("Not sure to buy again", "Never put it on the shopping list until you switch this off", unsure) { unsure = it; if (it) refill = false }
@@ -378,6 +455,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     var receipt by rememberSaveable { mutableStateOf("") }
     var originalReceipt by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
+    var mealsText by rememberSaveable { mutableStateOf("") }
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(item?.id, existing?.id) {
@@ -396,16 +474,17 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             val entries = state.entries(itemId)
             val last = Pantry.lastPriced(entries)
             shop = last?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
-            val unitPrice = last?.let { Pantry.unitPriceMinor(it) }
+            val unitPrice = last?.let { Pantry.unitPriceMinor(it, item.unitValue()) }
+            if (!item.unitValue().isLevel && item.packSize <= 0) qtyText = Qty.format(Pantry.buyAmount(item.unitValue(), entries))
             if (item.packSize > 0) {
                 inPacks = true
                 qtyText = "1"
                 // Pre-fill what one pack cost last time.
                 Pantry.priceFor(entries, item.packSize)?.let { priceText = Money.minorToInput(it) }
             } else if (unitPrice != null) {
-                // For one unit, the total and the unit price are the same.
-                perUnit = item.unitValue() == QtyUnit.KG || item.unitValue() == QtyUnit.LITRE
-                priceText = Money.minorToInput(unitPrice)
+                // Kilos, grams and litres are priced per kg or litre; one piece costs its unit price.
+                perUnit = item.unitValue().byWeight
+                priceText = Money.minorToInput(if (perUnit) unitPrice else Pantry.priceFor(entries, Qty.parse(qtyText) ?: 1.0) ?: unitPrice)
             }
         }
         loaded = true
@@ -419,9 +498,11 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     val priceError = priceText.isNotBlank() && price == null
     val total = when {
         price == null || qty == null -> null
-        perUnit -> Pantry.totalMinor(price, entered ?: qty)
+        perUnit && packMode -> Pantry.totalMinor(price, entered ?: qty)
+        perUnit -> Pantry.totalMinor(price, qty, item?.unitValue() ?: QtyUnit.PIECE)
         else -> price
     }
+    val mealsValue = if (mealsText.isBlank()) 0.0 else Qty.parse(mealsText)
 
     fun leave(saved: Boolean) {
         if (!saved && receipt.isNotBlank() && receipt != originalReceipt) vm.discardPhoto(receipt)
@@ -430,7 +511,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     BackHandler { leave(false) }
 
     fun save() {
-        if (qty == null || priceError || item == null) {
+        if (qty == null || priceError || item == null || mealsValue == null) {
             showErrors = true
             return
         }
@@ -449,6 +530,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             ),
             replacedReceipt = originalReceipt,
         )
+        if ((mealsValue ?: 0.0) > 0) Meals.perUnit(qty, mealsValue!!)?.let { vm.setMealsPerUnit(item.id, it) }
         leave(true)
     }
 
@@ -474,7 +556,11 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             NumberField(
                 value = qtyText,
                 onChange = { qtyText = it },
-                label = if (packMode) "How many packs" else "How many ${unit.plural}",
+                label = when {
+                    packMode -> "How many packs"
+                    unit.byWeight -> "How much (${unit.plural})"
+                    else -> "How many ${unit.plural}"
+                },
                 isError = showErrors && qty == null,
                 error = "Enter an amount above 0",
             )
@@ -494,9 +580,33 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 error = "Enter a price, up to 2 decimals",
             )
             if (perUnit && total != null && entered != null) {
-                Hint("${Qty.format(entered)} × ${Money.format(price ?: 0, currency)} = ${Money.format(total, currency)}")
-            } else if (!perUnit && total != null && qty != null && qty != 1.0) {
-                Hint("${Money.format(Pantry.totalMinor(total, 1.0 / qty), currency)} ${unit.priceLabel}")
+                Hint("${if (packMode) Qty.format(entered) else unit.label(qty ?: entered)} × ${Money.format(price ?: 0, currency)} $perLabel = ${Money.format(total, currency)}")
+            } else if (!perUnit && total != null && qty != null && (qty != 1.0 || unit.priceDivisor > 1)) {
+                Pantry.unitPriceMinor(com.rachitratnammudaliar.kitchtally.domain.Entry(EventType.BOUGHT, today, qty, total), unit)?.let {
+                    Hint("${Money.format(it, currency)} ${unit.priceLabel}")
+                }
+            }
+            // Was it cheaper somewhere else lately?
+            if (total != null && qty != null && total > 0) {
+                val mine = Pantry.unitPriceMinor(com.rachitratnammudaliar.kitchtally.domain.Entry(EventType.BOUGHT, today, qty, total), unit)
+                val cheaper = mine?.let { Pantry.cheaperElsewhere(state?.entries(itemId).orEmpty(), unit, it, shop, today) }
+                if (cheaper != null) {
+                    Hint("💡 Cheaper at ${cheaper.shop} last time: ${Money.format(cheaper.unitPriceMinor, currency)} ${unit.priceLabel}")
+                }
+            }
+
+            if (item.countMeals) {
+                SectionLabel("Meals (optional)")
+                val guess = qty?.takeIf { item.mealsPerUnit > 0 }?.let { Meals.left(it, item.mealsPerUnit) }
+                NumberField(
+                    value = mealsText,
+                    onChange = { mealsText = it },
+                    label = "These make about … meals",
+                    placeholder = guess?.let { Qty.approx(it) } ?: "e.g. 4",
+                    isError = showErrors && mealsValue == null,
+                    error = "A number above 0, or leave it empty",
+                )
+                Hint(if (guess != null) "Leave it empty to keep about ${Qty.approx(guess)}." else "Look at what you bought and guess. You can change it any time.")
             }
 
             SectionLabel("Shop")

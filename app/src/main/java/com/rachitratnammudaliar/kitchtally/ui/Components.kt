@@ -119,7 +119,7 @@ fun ItemImage(name: String, photoFile: String, size: Dp = 48.dp, category: Strin
 fun StockPill(text: String, status: StockStatus, onClick: (() -> Unit)? = null) {
     val dark = isSystemInDarkTheme()
     val (bg, fg) = when (status) {
-        StockStatus.OUT -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
+        StockStatus.OUT, StockStatus.LAST -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
         StockStatus.LOW -> (if (dark) Color(0xFF5A3D00) else Color(0xFFFFE2B0)) to (if (dark) Color(0xFFFFDDB3) else Color(0xFF5A3500))
         StockStatus.OK -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
     }
@@ -132,6 +132,17 @@ fun StockPill(text: String, status: StockStatus, onClick: (() -> Unit)? = null) 
             .let { if (onClick != null) it.clickable(onClick = onClick) else it }
             .padding(horizontal = 10.dp, vertical = 3.dp),
     )
+}
+
+/** Text colour for an "almost out" or "last meal" line. */
+@Composable
+fun statusColor(status: StockStatus): Color {
+    val dark = isSystemInDarkTheme()
+    return when (status) {
+        StockStatus.OUT, StockStatus.LAST -> MaterialTheme.colorScheme.error
+        StockStatus.LOW -> if (dark) Color(0xFFFFC870) else Color(0xFF8A5300)
+        StockStatus.OK -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
 }
 
 /** A number with a label underneath, for summary cards. */

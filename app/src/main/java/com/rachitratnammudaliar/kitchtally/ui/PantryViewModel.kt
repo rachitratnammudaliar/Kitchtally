@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.coroutines.FlowPreview::class)
+
 package com.rachitratnammudaliar.kitchtally.ui
 
 import android.app.Application
@@ -16,8 +18,10 @@ import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
+import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
+import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
@@ -27,6 +31,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -71,6 +76,85 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     fun setCurrency(code: String) {
         prefs.currency = code
         _currency.value = code
+    }
+
+    private val _showSpending = MutableStateFlow(prefs.showSpending)
+    val showSpending: StateFlow<Boolean> = _showSpending.asStateFlow()
+
+    fun setShowSpending(show: Boolean) {
+        prefs.showSpending = show
+        _showSpending.value = show
+    }
+
+    private val _budgetMinor = MutableStateFlow(prefs.budgetMinor)
+    val budgetMinor: StateFlow<Long> = _budgetMinor.asStateFlow()
+
+    fun setBudget(minor: Long) {
+        prefs.budgetMinor = minor
+        _budgetMinor.value = prefs.budgetMinor
+    }
+
+    init {
+        // Keep the home screen widget in step with every change.
+        viewModelScope.launch {
+            combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes()) { _, _, _ -> Unit }
+                .debounce(500)
+                .collect { ShoppingWidget.refresh(getApplication()) }
+        }
+    }
+
+    /**
+     * Cook: one meal from each chosen item (or one tap's worth if it doesn't count meals), logged
+     * together and undone together. Never takes more than is left.
+     */
+    fun cook(items: List<Item>, shared: Boolean, onDone: (message: String, undo: () -> Unit) -> Unit) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            val ids = tapLock.withLock {
+                db.withTransaction {
+                    items.mapNotNull { item ->
+                        val amount = Pantry.useAmount(Meals.cookAmount(item.step, if (item.countMeals) item.mealsPerUnit else 0.0), dao.stockOf(item.id))
+                        if (amount <= 0) return@mapNotNull null
+                        val type = if (shared) EventType.SHARED else EventType.USED
+                        dao.insert(Event(itemId = item.id, type = type.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount, note = "Cooked"))
+                    }
+                }
+            }
+            if (ids.isEmpty()) return@launch
+            val names = items.joinToString(", ") { it.name }
+            onDone("Cooked with $names") { viewModelScope.launch { db.withTransaction { ids.forEach { dao.deleteEvent(it) } } } }
+        }
+    }
+
+    /** "Done shopping": everything ticked is bought at once, at last time's amount, shop and price. */
+    fun doneShopping(state: PantryState, items: List<Item>, onDone: (message: String, undo: () -> Unit) -> Unit) {
+        if (items.isEmpty()) return
+        val today = LocalDate.now().toEpochDay()
+        viewModelScope.launch {
+            val buys = tapLock.withLock {
+                db.withTransaction {
+                    items.map { item ->
+                        val entries = state.entries(item.id)
+                        val amount = Pantry.buyAmount(item.unitValue(), entries, item.packSize)
+                        val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
+                        val id = dao.insert(
+                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.expectedPriceMinor(item.unitValue(), entries, item.packSize), shop = shop),
+                        )
+                        dao.clearRefill(item.id)
+                        QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList)
+                    }
+                }
+            }
+            onDone("Bought ${buys.size} item${if (buys.size == 1) "" else "s"}") { buys.forEach { undoBuy(it) } }
+        }
+    }
+
+    /** From the purchase screen: "these make about 8 meals" sets meals per unit. */
+    fun setMealsPerUnit(itemId: Long, mealsPerUnit: Double) {
+        viewModelScope.launch {
+            val item = dao.item(itemId) ?: return@launch
+            dao.update(item.copy(countMeals = true, mealsPerUnit = mealsPerUnit))
+        }
     }
 
     /** Saves an item. For a new one, [startStock] above zero is logged as the starting amount. */
@@ -304,42 +388,47 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             val b = EventType.BOUGHT
             val u = EventType.USED
             val s = EventType.SHARED
-            suspend fun add(name: String, category: String, unit: QtyUnit, life: Life, vararg events: Event, lowAt: Double = 1.0, refill: Boolean = false) {
+            suspend fun add(
+                name: String, category: String, unit: QtyUnit, life: Life, vararg events: Event,
+                lowAt: Double = Pantry.defaultLowAt(unit), refill: Boolean = false, meals: Double = 0.0, pack: Double = 0.0,
+                step: Double = Pantry.defaultStep(unit), unsure: Boolean = false, lowInMeals: Boolean = false,
+            ) {
                 db.withTransaction {
                     dao.insertItemWithEvents(
-                        Item(name = name, category = category, unit = unit.name, life = life.name, lowAt = lowAt, refillNeeded = refill, step = Pantry.defaultStep(unit)),
+                        Item(
+                            name = name, category = category, unit = unit.name, life = life.name, lowAt = lowAt, refillNeeded = refill, step = step,
+                            packSize = pack, countMeals = meals > 0, mealsPerUnit = meals, unsure = unsure, lowInMeals = lowInMeals,
+                        ),
                         events.toList(),
                     )
                 }
             }
-            add("Bread", "Bread & bakery", QtyUnit.PACKET, Life.SHORT,
-                ev(b, 12, 2.0, 178, "IKI"), ev(u, 11), ev(u, 9), ev(b, 7, 2.0, 178, "IKI"), ev(u, 6), ev(s, 4), ev(b, 3, 2.0, 178, "Norfa"), ev(u, 1), ev(b, 0, 2.0, 178, "IKI"), ev(u, 0), ev(s, 0))
-            add("Milk", "Dairy & eggs", QtyUnit.BOTTLE, Life.SHORT,
-                ev(b, 9, 2.0, 198, "Maxima"), ev(u, 7), ev(u, 3), ev(b, 2, 1.0, 99, "IKI"), ev(u, 1), ev(b, 0, 2.0, 198, "IKI"), ev(u, 0))
+            add("Bread", "Bread & bakery", QtyUnit.LEVEL, Life.SHORT,
+                ev(b, 6, 1.0, 129, "IKI"), ev(u, 5, 0.25), ev(u, 4, 0.25), ev(u, 3, 0.5), ev(b, 2, 1.0, 129, "IKI"), ev(u, 1, 0.25), ev(u, 0, 0.5))
+            add("Milk", "Dairy & eggs", QtyUnit.LEVEL, Life.SHORT,
+                ev(b, 3, 1.0, 99, "Maxima"), ev(u, 2, 0.25), ev(u, 0, 0.25))
             add("Basmati rice", "Staples", QtyUnit.KG, Life.LONG,
-                ev(b, 20, 5.0, 1245, "Maxima"), ev(u, 15, 0.5), ev(u, 10, 0.5), ev(s, 4, 1.0), ev(u, 2, 0.5))
+                ev(b, 20, 5.0, 1245, "Maxima"), ev(u, 15, 0.5), ev(u, 10, 0.5), ev(s, 4, 1.0), ev(u, 2, 0.5), meals = 6.0, step = 0.25)
             add("Atta", "Staples", QtyUnit.KG, Life.LONG,
                 ev(b, 25, 5.0, 899, "Lidl"), ev(u, 18), ev(u, 9), ev(s, 4))
-            add("Tomatoes", "Vegetables", QtyUnit.KG, Life.SHORT,
-                ev(b, 6, 1.0, 249, "Lidl"), ev(u, 4, 0.5), ev(s, 2, 0.5), ev(b, 0, 1.0, 239, "Lidl"), ev(s, 0, 0.5))
-            add("Red onion", "Vegetables", QtyUnit.KG, Life.MEDIUM,
-                ev(b, 14, 2.0, 138, "Norfa"), ev(u, 10, 0.5), ev(u, 6, 0.5), ev(u, 2, 0.5))
+            add("Tomatoes", "Vegetables", QtyUnit.PIECE, Life.MEDIUM,
+                ev(b, 6, 6.0, 249, "Lidl"), ev(u, 4, 2.0), ev(s, 2, 1.0), meals = 0.5)
+            add("Red onion", "Vegetables", QtyUnit.PIECE, Life.MEDIUM,
+                ev(b, 9, 5.0, 138, "Norfa"), ev(b, 2, 5.0, 129, "Lidl"), ev(u, 6, 2.0), ev(u, 1, 3.0), meals = 1.6)
             add("Spaghetti", "Staples", QtyUnit.PACKET, Life.LONG,
-                ev(b, 16, 3.0, 237, "Rimi"), ev(u, 12), ev(s, 5))
-            db.withTransaction {
-                dao.insertItemWithEvents(
-                    Item(name = "Eggs", category = "Dairy & eggs", unit = QtyUnit.PIECE.name, life = Life.MEDIUM.name, lowAt = 3.0, packSize = 10.0),
-                    listOf(ev(b, 5, 10.0, 289, "IKI"), ev(u, 3, 2.0), ev(s, 1, 2.0)),
-                )
-            }
-            add("Body wash", "Personal care", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
-            add("Dishwashing liquid", "Household", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
-            db.withTransaction {
-                dao.insertItemWithEvents(
-                    Item(name = "Instant noodles", category = "Staples", unit = QtyUnit.PACKET.name, life = Life.LONG.name, unsure = true),
-                    listOf(ev(b, 20, 5.0, 295, "Maxima"), ev(u, 15, 2.0), ev(u, 8, 2.0), ev(u, 3)),
-                )
-            }
+                ev(b, 16, 2.0, 158, "Rimi"), ev(u, 12, 0.5), ev(s, 5, 0.5), meals = 4.0, step = 0.25)
+            add("Eggs", "Dairy & eggs", QtyUnit.PIECE, Life.MEDIUM,
+                ev(b, 5, 10.0, 289, "IKI"), ev(u, 3, 2.0), ev(s, 1, 2.0), lowAt = 3.0, pack = 10.0, meals = 0.5, step = 2.0)
+            add("Chicken", "Meat & protein", QtyUnit.PACKET, Life.SHORT,
+                ev(b, 4, 1.0, 449, "Maxima"), ev(u, 2, 0.34), ev(s, 1, 0.33), meals = 3.0, lowAt = 2.0, lowInMeals = true)
+            add("Sunflower oil", "Staples", QtyUnit.LEVEL, Life.LONG,
+                ev(b, 30, 1.0, 239, "Lidl"), ev(u, 20, 0.4), ev(u, 10, 0.4), ev(u, 2, 0.1), lowAt = 0.1, step = 0.05)
+            add("Frozen veggie mix", "Vegetables", QtyUnit.LEVEL, Life.MEDIUM,
+                ev(b, 3, 1.0, 199, "IKI"), ev(u, 1, 0.2), meals = 4.0)
+            add("Body wash", "Personal care", QtyUnit.LEVEL, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), ev(u, 10, 0.5), refill = true)
+            add("Dishwashing liquid", "Household", QtyUnit.LEVEL, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1, 0.25))
+            add("Instant noodles", "Staples", QtyUnit.PACKET, Life.LONG,
+                ev(b, 20, 5.0, 295, "Maxima"), ev(u, 15, 2.0), ev(u, 8, 2.0), ev(u, 3), unsure = true)
             dao.insert(ShoppingNote(text = "Birthday candles"))
             dao.insert(ShoppingNote(text = "Aluminium foil"))
         }

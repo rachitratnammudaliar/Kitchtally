@@ -37,10 +37,13 @@ shot() {
 
 adb shell cmd uimode night no
 shot pantry home
-shot item:1 item
+shot item:6 item
 shot shopping shopping
 shot week week
 shot buy:3:0 purchase
+shot edit:6 edit
+shot cook cook
+shot adjust:1 adjust
 
 adb shell cmd uimode night yes
 sleep 2

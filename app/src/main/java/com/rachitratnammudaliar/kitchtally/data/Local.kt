@@ -128,4 +128,14 @@ class Prefs(context: Context) {
     var currency: String
         get() = prefs.getString("currency", "EUR") ?: "EUR"
         set(value) = prefs.edit().putString("currency", value).apply()
+
+    /** Money on the Weekly tab stays hidden until you ask for it. */
+    var showSpending: Boolean
+        get() = prefs.getBoolean("show_spending", false)
+        set(value) = prefs.edit().putBoolean("show_spending", value).apply()
+
+    /** Monthly budget in cents; 0 means off. */
+    var budgetMinor: Long
+        get() = prefs.getLong("budget_minor", 0L)
+        set(value) = prefs.edit().putLong("budget_minor", value.coerceAtLeast(0L)).apply()
 }

@@ -45,7 +45,9 @@ class PantryTest {
     @Test
     fun freshnessOnlyForShortAndMedium() {
         assertTrue(Pantry.checkFreshness(listOf(bought(6)), Life.SHORT, today))
-        assertFalse(Pantry.checkFreshness(listOf(bought(4)), Life.SHORT, today))
+        assertFalse(Pantry.checkFreshness(listOf(bought(3)), Life.SHORT, today))
+        assertTrue(Pantry.checkFreshness(listOf(bought(11)), Life.MEDIUM, today))
+        assertFalse(Pantry.checkFreshness(listOf(bought(10)), Life.MEDIUM, today))
         assertFalse(Pantry.checkFreshness(listOf(bought(60)), Life.LONG, today))
         assertFalse(Pantry.checkFreshness(listOf(bought(6), used(1)), Life.SHORT, today))
     }
@@ -165,5 +167,100 @@ class PantryTest {
     @Test
     fun shopOptionsKeepPresetsFirstWithoutDuplicates() {
         assertEquals(listOf("IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco", "Aibė"), Shops.options(listOf("iki", "Aibė", " ", "Aibė")))
+    }
+
+    @Test
+    fun percentItems() {
+        val u = QtyUnit.LEVEL
+        assertEquals("80%", u.label(0.8))
+        assertEquals("25%", u.label(0.25))
+        assertEquals("1 full", u.label(1.0))
+        assertEquals("1 full + 50%", u.label(1.5))
+        assertEquals("80% left", u.leftLabel(0.8))
+        assertEquals("Full", u.leftLabel(1.0))
+        assertEquals("2 full", u.leftLabel(2.0))
+        assertEquals("1 full + 25%", u.leftLabel(1.25))
+        assertEquals(0.25, Pantry.defaultStep(u), 0.0)
+        assertEquals(0.25, Pantry.defaultLowAt(u), 0.0)
+        assertEquals(1.0, Pantry.buyAmount(u, listOf(bought(3))), 0.0)
+        // Low only at its own threshold: 25% and below, never earlier because of fast use.
+        val bread = Counting(u, 0.25)
+        assertEquals(StockStatus.OK, Pantry.status(listOf(bought(2), used(1, 0.25), used(0, 0.25)), bread, today))
+        assertEquals(StockStatus.LOW, Pantry.status(listOf(bought(2), used(1, 0.5), used(0, 0.25)), bread, today))
+        assertEquals(StockStatus.OUT, Pantry.status(listOf(bought(2), used(0, 1.0)), bread, today))
+        // 10% for oil.
+        assertEquals(StockStatus.OK, Pantry.status(listOf(bought(9), used(1, 0.85)), Counting(u, 0.1), today))
+        assertEquals(StockStatus.LOW, Pantry.status(listOf(bought(9), used(1, 0.9)), Counting(u, 0.1), today))
+    }
+
+    @Test
+    fun gramsArePricedPerKg() {
+        val g = QtyUnit.GRAM
+        assertEquals("500 g", g.label(500.0))
+        val e = bought(1, 500.0, 120)
+        assertEquals(240L, Pantry.unitPriceMinor(e, g))
+        assertEquals(100L, Pantry.totalMinor(200, 500.0, g))
+        assertEquals(500.0, Pantry.buyAmount(g, emptyList()), 0.0)
+        assertEquals(750.0, Pantry.buyAmount(g, listOf(bought(2, 750.0))), 0.0)
+        assertEquals(100.0, Pantry.defaultStep(g), 0.0)
+        assertEquals(1500L, Pantry.unitPriceMinor(bought(1, 200.0, 300), QtyUnit.ML))
+        assertEquals(240L, Pantry.unitPriceMinor(bought(1, 0.5, 120), QtyUnit.KG))
+    }
+
+    @Test
+    fun mealsLeftAndRed() {
+        assertEquals("about 8 meals", Meals.label(Meals.left(5.0, 1.6)))
+        assertEquals("1 meal", Meals.label(1.0))
+        assertEquals("less than 1 meal", Meals.label(0.4))
+        assertEquals("no meals", Meals.label(0.0))
+        assertEquals(1.6, Meals.perUnit(5.0, 8.0)!!, 0.0)
+        assertNull(Meals.perUnit(0.0, 8.0))
+        assertEquals(0.25, Meals.cookAmount(1.0, 4.0), 0.0)
+        assertEquals(0.5, Meals.cookAmount(0.5, 0.0), 0.0)
+
+        val potatoes = Counting(QtyUnit.PIECE, lowAt = 2.0, mealsPerUnit = 0.6, lowInMeals = true)
+        // 5 potatoes = 3 meals: fine. 3 = about 1.8: low. 1 = 0.6: red.
+        assertEquals(StockStatus.OK, Pantry.status(listOf(bought(3, 5.0)), potatoes, today))
+        assertEquals(StockStatus.LOW, Pantry.status(listOf(bought(3, 5.0), used(1, 2.0)), potatoes, today))
+        assertEquals(StockStatus.LAST, Pantry.status(listOf(bought(3, 5.0), used(1, 4.0)), potatoes, today))
+        // Counting meals, but "running low at" in pieces: red still comes at one meal.
+        val spaghetti = Counting(QtyUnit.PACKET, lowAt = 0.0, mealsPerUnit = 4.0)
+        assertEquals(StockStatus.OK, Pantry.status(listOf(bought(3, 1.0), used(1, 0.5)), spaghetti, today))
+        assertEquals(StockStatus.LAST, Pantry.status(listOf(bought(3, 1.0), used(1, 0.75)), spaghetti, today))
+    }
+
+    @Test
+    fun cheaperElsewhereAndLastShop() {
+        val entries = listOf(bought(30, 1.0, 199, "IKI"), bought(10, 1.0, 159, "Lidl"), bought(5, 1.0, 189, "Maxima"), bought(400, 1.0, 99, "Rimi"))
+        assertEquals("Maxima", Pantry.lastShop(entries))
+        val cheaper = Pantry.cheaperElsewhere(entries, QtyUnit.PIECE, 199, "IKI", today)!!
+        assertEquals("Lidl", cheaper.shop)
+        assertEquals(159L, cheaper.unitPriceMinor)
+        assertNull(Pantry.cheaperElsewhere(entries, QtyUnit.PIECE, 150, "IKI", today))
+        assertNull(Pantry.cheaperElsewhere(entries, QtyUnit.PIECE, 159, "Lidl", today)?.takeIf { it.shop == "Lidl" })
+        assertEquals("", Pantry.lastShop(listOf(bought(1))))
+    }
+
+    @Test
+    fun spendingBetweenDates() {
+        val byItem = mapOf(1L to listOf(bought(2, 1.0, 100), bought(40, 1.0, 999)), 2L to listOf(bought(0, 1.0, 250), used(0)))
+        assertEquals(350L, Pantry.spentBetween(byItem, d(10), today))
+    }
+
+    @Test
+    fun suggestionsCountMealsAndPieces() {
+        assertEquals(QtyUnit.PIECE, Suggestions.forName("Red Onion")!!.unit)
+        assertEquals(QtyUnit.PIECE, Suggestions.forName("Potato")!!.unit)
+        assertTrue(Suggestions.forName("Potato")!!.countMeals)
+        assertTrue(Suggestions.forName("Pasta/spagheti")!!.countMeals)
+        assertFalse(Suggestions.forName("Salt")!!.countMeals)
+        assertFalse(Suggestions.forName("Oil")!!.countMeals)
+        assertEquals(QtyUnit.LEVEL, Suggestions.forName("Oil")!!.unit)
+        assertEquals(QtyUnit.LEVEL, Suggestions.forName("Bread")!!.unit)
+        assertEquals(QtyUnit.LEVEL, Suggestions.forName("Tomato ketchup")!!.unit)
+        assertEquals(QtyUnit.LEVEL, Suggestions.forName("Veggie mix")!!.unit)
+        assertEquals("Spices", Suggestions.forName("Chilli powder")!!.category)
+        assertEquals(QtyUnit.PIECE, Suggestions.forName("Toothbrush")!!.unit)
+        assertEquals(QtyUnit.LEVEL, Suggestions.forName("Toothpaste")!!.unit)
     }
 }

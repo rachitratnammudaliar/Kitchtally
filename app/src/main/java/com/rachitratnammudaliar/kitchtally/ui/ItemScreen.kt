@@ -57,8 +57,10 @@ import com.rachitratnammudaliar.kitchtally.data.date
 import com.rachitratnammudaliar.kitchtally.data.lifeValue
 import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
+import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.EventType
+import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
@@ -107,7 +109,7 @@ fun ItemScreen(
         val entries = state.entries(id)
         val unit = item.unitValue()
         val stock = Pantry.stock(entries)
-        val status = Pantry.status(entries, item.lowAt, today)
+        val status = Pantry.status(entries, item.counting(), today)
         val lastPriced = Pantry.lastPriced(entries)
 
         Column(
@@ -179,17 +181,24 @@ fun ItemScreen(
                     HorizontalDivider()
                     InfoRow("Lasts", item.lifeValue().label, item.lifeValue().description)
                     HorizontalDivider()
-                    InfoRow("Running low at", unit.label(item.lowAt))
+                    if (item.countMeals) {
+                        InfoRow(
+                            "Meals",
+                            if (item.mealsPerUnit > 0) (if (stock > 0) "${Meals.label(Meals.left(stock, item.mealsPerUnit))} left" else "None left") else "Not set yet",
+                            if (item.mealsPerUnit > 0) "${if (item.packSize > 0) "1 pack" else if (unit.isLevel) "A full one" else "1 ${unit.singular}"} makes about ${Qty.format(Qty.round(item.mealsPerUnit * (if (item.packSize > 0) item.packSize else 1.0)))}" else "Edit the item, or fill it in when you buy",
+                        )
+                        HorizontalDivider()
+                    }
+                    InfoRow("Running low at", if (item.lowInMeals && item.countMeals) Meals.label(item.lowAt).removePrefix("about ") else unit.label(item.lowAt))
                     HorizontalDivider()
                     InfoRow("Each tap", "− uses ${unit.label(item.step)}", "＋ adds ${unit.label(Pantry.buyAmount(unit, entries, item.packSize))}")
                     Pantry.dailyUse(entries, today)?.let { rate ->
                         HorizontalDivider()
-                        val perWeek = Qty.approx(rate * 7)
-                        InfoRow("You use", "about $perWeek ${if (perWeek == "1") unit.singular else unit.plural} a week")
+                        InfoRow("You use", "about ${if (unit.isLevel) unit.label(Qty.round(rate * 7)) else Qty.approx(rate * 7) + " " + (if (Qty.approx(rate * 7) == "1") unit.singular else unit.plural)} a week")
                     }
                     if (lastPriced != null) {
                         HorizontalDivider()
-                        val unitPrice = Pantry.unitPriceMinor(lastPriced)
+                        val unitPrice = Pantry.unitPriceMinor(lastPriced, unit)
                         InfoRow(
                             "Last price",
                             unitPrice?.let { "${Money.format(it, currency)} ${unit.priceLabel}" } ?: "",

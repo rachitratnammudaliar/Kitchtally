@@ -29,6 +29,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.domain.Money
@@ -85,6 +91,29 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             SectionLabel("Currency")
             ChipRow(Money.currencies, currency, { it }, vm::setCurrency)
             Hint("Prices are shown in this currency. Changing it doesn't convert amounts you've already entered.")
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionLabel("Spending")
+            val showSpending by vm.showSpending.collectAsStateWithLifecycle()
+            val budget by vm.budgetMinor.collectAsStateWithLifecycle()
+            SwitchRow("Show spending on Weekly", "Off keeps money out of sight until you tap Show spending", showSpending) { vm.setShowSpending(it) }
+            var budgetText by rememberSaveable { mutableStateOf(if (budget > 0) Money.minorToInput(budget) else "") }
+            val budgetValue = if (budgetText.isBlank()) 0L else Money.parseToMinor(budgetText)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NumberField(
+                    value = budgetText,
+                    onChange = { budgetText = it },
+                    label = "Monthly budget in $currency (optional)",
+                    isError = budgetValue == null,
+                    error = "A number, or leave it empty",
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalButton(onClick = {
+                    vm.setBudget(budgetValue ?: 0L)
+                    scope.launch { snackbar.showSnackbar(if ((budgetValue ?: 0L) > 0) "Budget saved" else "Budget off") }
+                }, enabled = budgetValue != null) { Text("Save") }
+            }
+            Hint("Only shown on Weekly, under Show spending. Leave it empty to turn it off.")
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Backup")

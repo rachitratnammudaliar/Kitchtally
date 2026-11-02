@@ -5,7 +5,14 @@ package com.rachitratnammudaliar.kitchtally.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.platform.LocalContext
+import android.content.Intent
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -83,8 +90,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.lifeValue
+import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
@@ -99,32 +108,67 @@ import java.time.LocalDateTime
 
 /* ============================ Presentation ============================ */
 
-/** "2 packets left", "Out", "0.5 kg left". */
+/** "2 packets left", "Out", "0.5 kg left", "80% left", "Full". */
 fun stockLabel(item: Item, stock: Double): String =
-    if (stock <= 0) "Out" else "${item.unitValue().label(stock)} left"
+    if (stock <= 0) "Out" else item.unitValue().leftLabel(stock)
 
-/** The second line under an item: freshness, days left, or when it was last bought. */
+/** "about 6 meals", or null if this item doesn't count meals or they aren't set yet. */
+fun mealsText(item: Item, stock: Double): String? =
+    if (item.countMeals && item.mealsPerUnit > 0 && stock > 0) Meals.label(Meals.left(stock, item.mealsPerUnit)) else null
+
+/**
+ * The second line under an item. Almost out comes first; then meals left; then freshness, days
+ * left, or when it was last bought.
+ */
 fun detailLine(item: Item, state: PantryState, today: LocalDate): String {
     val entries = state.entries(item.id)
+    val stock = Pantry.stock(entries)
+    val status = Pantry.status(entries, item.counting(), today)
+    val meals = mealsText(item, stock)
+    val listed = if (onShoppingList(item, state, today)) " · on your To buy list" else ""
+    if (stock > 0 && status == StockStatus.LAST) return "Last meal left$listed"
+    if (stock > 0 && status == StockStatus.LOW) return listOfNotNull(meals?.replaceFirstChar { it.uppercase() }, if (meals == null) "Almost out" else "almost out").joinToString(" · ") + listed
     val last = Pantry.lastBought(entries)
-    if (Pantry.checkFreshness(entries, item.lifeValue(), today) && last != null) {
-        return "Bought ${Pantry.daysAgoLabel(last.date, today)} · check it's fresh"
+    val rest = when {
+        Pantry.checkFreshness(entries, item.lifeValue(), today) && last != null -> "bought ${Pantry.daysAgoLabel(last.date, today)} · check it's fresh"
+        stock > 0 && !item.unitValue().isLevel && meals == null && Pantry.daysLeft(entries, today) != null -> when (val left = Pantry.daysLeft(entries, today)) {
+            0L -> "likely runs out today"
+            1L -> "about 1 day left"
+            else -> "about $left days left"
+        }
+        last != null -> "bought ${Pantry.daysAgoLabel(last.date, today)}" + if (last.shop.isNotBlank()) " at ${last.shop}" else ""
+        else -> "not bought yet"
     }
-    val left = Pantry.daysLeft(entries, today)
-    if (left != null && Pantry.stock(entries) > 0) {
-        return when (left) {
-            0L -> "Likely runs out today"
-            1L -> "About 1 day left"
-            else -> "About $left days left"
+    return listOfNotNull(meals, rest).joinToString(" · ").replaceFirstChar { it.uppercase() }
+}
+
+/** The To buy list as plain text, grouped by shop, for WhatsApp and the like. */
+fun shoppingText(state: PantryState, today: LocalDate): String {
+    val list = state.items.filter { onShoppingList(it, state, today) }
+    val byShop = list.groupBy { Pantry.lastShop(state.entries(it.id)) }
+    return buildString {
+        append("Shopping list")
+        shopOrder(byShop.keys).forEach { shop ->
+            append("\n\n").append(shop.ifEmpty { "Anywhere" })
+            byShop[shop].orEmpty().sortedBy { it.name.lowercase() }.forEach { item ->
+                val amount = Pantry.buyAmount(item.unitValue(), state.entries(item.id), item.packSize)
+                append("\n• ").append(item.name).append(" (").append(item.unitValue().label(amount)).append(")")
+            }
+        }
+        if (state.notes.isNotEmpty()) {
+            append("\n\nAlso need")
+            state.notes.forEach { append("\n• ").append(it.text) }
         }
     }
-    if (last != null) return "Bought ${Pantry.daysAgoLabel(last.date, today)}" + if (last.shop.isNotBlank()) " at ${last.shop}" else ""
-    return "Not bought yet"
 }
+
+/** Shops alphabetically, with "no shop" (empty) last. */
+fun shopOrder(shops: Collection<String>): List<String> =
+    shops.filter { it.isNotEmpty() }.distinct().sortedBy { it.lowercase() } + listOfNotNull("".takeIf { it in shops })
 
 /** On the list when marked, out or running low, unless hidden until it's bought again. */
 fun onShoppingList(item: Item, state: PantryState, today: LocalDate): Boolean =
-    !item.unsure && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.lowAt, today) != StockStatus.OK))
+    !item.unsure && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.counting(), today) != StockStatus.OK))
 
 const val UNSURE_GROUP = "🤔  Not sure to buy again"
 
@@ -150,9 +194,25 @@ fun CoroutineScope.undoSnackbar(host: SnackbarHostState, message: String, onUndo
  * "buy:ITEM:EVENT". Only debug builds pass anything other than "pantry" (used for screenshots).
  */
 @Composable
-fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: PantryViewModel = viewModel()) {
+fun KitchtallyRoot(
+    startScreen: String = "pantry",
+    demo: Boolean = false,
+    openRequest: String? = null,
+    onOpened: () -> Unit = {},
+    vm: PantryViewModel = viewModel(),
+) {
     var route by rememberSaveable { mutableStateOf(startScreen) }
     var tab by rememberSaveable { mutableStateOf(if (startScreen in listOf("shopping", "week")) startScreen else "pantry") }
+    /** Debug screenshots can open the Cook box or an item's adjust box straight away. */
+    val openCook = startScreen == "cook"
+    val openAdjust = if (startScreen.startsWith("adjust:")) startScreen.removePrefix("adjust:").toLongOrNull() ?: 0L else 0L
+    LaunchedEffect(openRequest) {
+        if (openRequest == "shopping") {
+            tab = "shopping"
+            route = "shopping"
+        }
+        if (openRequest != null) onOpened()
+    }
     /** Where the purchase screen returns to. */
     var back by rememberSaveable { mutableStateOf("") }
 
@@ -207,6 +267,8 @@ fun KitchtallyRoot(startScreen: String = "pantry", demo: Boolean = false, vm: Pa
             onAdd = { route = "edit:0" },
             onBuy = { back = tab; route = "buy:$it:0" },
             onSettings = { route = "settings" },
+            openCook = openCook,
+            openAdjust = openAdjust,
         )
     }
 }
@@ -223,9 +285,24 @@ private fun MainTabs(
     onAdd: () -> Unit,
     onBuy: (Long) -> Unit,
     onSettings: () -> Unit,
+    openCook: Boolean = false,
+    openAdjust: Long = 0L,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val toBuy = state?.items?.count { onShoppingList(it, state, today) } ?: 0
+    var cooking by rememberSaveable { mutableStateOf(openCook) }
+    /** Items ticked on the To buy list, for "Done shopping". */
+    var ticked by rememberSaveable { mutableStateOf(listOf<Long>()) }
+    val tickedNow = state?.let { s -> ticked.filter { id -> s.item(id)?.let { onShoppingList(it, s, today) } == true } }.orEmpty()
+
+    if (cooking && state != null) {
+        CookDialog(state, onDismiss = { cooking = false }) { chosen, shared ->
+            cooking = false
+            vm.cook(chosen, shared) { message, undo -> scope.undoSnackbar(snackbar, message, undo) }
+        }
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -239,7 +316,15 @@ private fun MainTabs(
                         fontWeight = FontWeight.SemiBold,
                     )
                 },
-                actions = { IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") } },
+                actions = {
+                    if (tab == "shopping" && state != null && toBuy + state.notes.size > 0) {
+                        IconButton(onClick = {
+                            val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, shoppingText(state, today))
+                            runCatching { context.startActivity(Intent.createChooser(send, "Share shopping list")) }
+                        }) { Icon(Icons.Default.Share, contentDescription = "Share list") }
+                    }
+                    IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
+                },
             )
         },
         bottomBar = {
@@ -261,6 +346,16 @@ private fun MainTabs(
         floatingActionButton = {
             if (tab == "pantry") {
                 FloatingActionButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add item") }
+            } else if (tab == "shopping" && tickedNow.isNotEmpty() && state != null) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        val items = tickedNow.mapNotNull { state.item(it) }
+                        ticked = emptyList()
+                        vm.doneShopping(state, items) { message, undo -> scope.undoSnackbar(snackbar, message, undo) }
+                    },
+                    icon = { Icon(Icons.Default.Check, contentDescription = null) },
+                    text = { Text("Done shopping · ${tickedNow.size}") },
+                )
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -268,9 +363,9 @@ private fun MainTabs(
         val s = state ?: return@Scaffold
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (tab) {
-            "shopping" -> ShoppingList(vm, s, today, currency, snackbar, onOpen, onBuy, modifier)
-            "week" -> WeekSummary(s, today, currency, onOpen, modifier)
-            else -> PantryList(vm, s, today, currency, snackbar, onOpen, onAdd, onTab, modifier)
+            "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> ticked = if (id in ticked) ticked - id else ticked + id }, onOpen, onBuy, modifier)
+            "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
+            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
         }
     }
 }
@@ -282,17 +377,18 @@ private fun PantryList(
     vm: PantryViewModel,
     state: PantryState,
     today: LocalDate,
-    currency: String,
     snackbar: SnackbarHostState,
     onOpen: (Long) -> Unit,
     onAdd: () -> Unit,
     onTab: (String) -> Unit,
+    onCook: () -> Unit,
     modifier: Modifier,
+    openAdjust: Long = 0L,
 ) {
     val scope = rememberCoroutineScope()
     var filter by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf("") }
-    var adjusting by rememberSaveable { mutableLongStateOf(0L) }
+    var adjusting by rememberSaveable { mutableLongStateOf(openAdjust) }
     state.item(adjusting)?.let { target ->
         AdjustDialog(target, state.stock(target.id), onDismiss = { adjusting = 0L }) { action, amount ->
             adjusting = 0L
@@ -328,6 +424,7 @@ private fun PantryList(
     } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it })
     val week = Pantry.week(Pantry.weekStart(today), state.entriesByItem) { id -> state.item(id)?.category ?: "" }
     val toBuy = state.items.count { onShoppingList(it, state, today) }
+    val almostOut = state.items.count { !it.unsure && state.stock(it.id) > 0 && Pantry.status(state.entries(it.id), it.counting(), today) != StockStatus.OK }
 
     LazyColumn(
         modifier = modifier,
@@ -343,14 +440,24 @@ private fun PantryList(
                 val on = MaterialTheme.colorScheme.onPrimaryContainer
                 Column(Modifier.padding(16.dp)) {
                     Text("This week", style = MaterialTheme.typography.labelLarge, color = on)
-                    Text(Money.format(week.spentMinor, currency), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.SemiBold, color = on)
-                    Text("spent on groceries and more", style = MaterialTheme.typography.bodySmall, color = on)
+                    Text(
+                        when {
+                            almostOut == 1 -> "1 thing is almost out"
+                            almostOut > 1 -> "$almostOut things are almost out"
+                            else -> "Your pantry is stocked"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = on,
+                    )
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         StatTile(week.itemsUsed.toString(), "items used", Modifier.weight(1f)) { onTab("week") }
-                        StatTile(week.timesShared.toString(), "times shared", Modifier.weight(1f)) { onTab("week") }
+                        StatTile(week.itemsBought.toString(), "bought new", Modifier.weight(1f)) { onTab("week") }
                         StatTile((toBuy + state.notes.size).toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onCook, modifier = Modifier.fillMaxWidth()) { Text("🍳  Cook a meal") }
                 }
             }
         }
@@ -425,7 +532,8 @@ private fun PantryList(
 private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: () -> Unit, onUse: () -> Unit, onShare: () -> Unit, onBuy: () -> Unit, onAdjust: () -> Unit) {
     val entries = state.entries(item.id)
     val stock = Pantry.stock(entries)
-    val status = Pantry.status(entries, item.lowAt, today)
+    val status = Pantry.status(entries, item.counting(), today)
+    val alert = stock > 0 && status != StockStatus.OK
     Card(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -439,10 +547,17 @@ private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: (
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 StockPill(stockLabel(item, stock) + (if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
-                Text(detailLine(item, state, today), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    detailLine(item, state, today),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (alert) statusColor(status) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (alert) FontWeight.Medium else null,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             OutlinedIconButton(onClick = onShare, enabled = stock > 0, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Person, contentDescription = "Shared 1 with friends", modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.Person, contentDescription = "Shared with friends", modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(4.dp))
             FilledTonalIconButton(onClick = onUse, enabled = stock > 0, modifier = Modifier.size(40.dp)) {
@@ -450,7 +565,7 @@ private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: (
             }
             Spacer(Modifier.width(4.dp))
             FilledIconButton(onClick = onBuy, modifier = Modifier.size(40.dp)) {
-                Icon(Icons.Default.Add, contentDescription = "Bought 1 more")
+                Icon(Icons.Default.Add, contentDescription = "Bought more")
             }
         }
     }
@@ -465,6 +580,8 @@ private fun ShoppingList(
     today: LocalDate,
     currency: String,
     snackbar: SnackbarHostState,
+    ticked: List<Long>,
+    onTick: (Long) -> Unit,
     onOpen: (Long) -> Unit,
     onBuy: (Long) -> Unit,
     modifier: Modifier,
@@ -472,14 +589,14 @@ private fun ShoppingList(
     val scope = rememberCoroutineScope()
     var newText by rememberSaveable { mutableStateOf("") }
     val list = state.items.filter { onShoppingList(it, state, today) }
-    fun status(item: Item) = Pantry.status(state.entries(item.id), item.lowAt, today)
-    val sections = listOf(
-        "Out" to list.filter { status(it) == StockStatus.OUT },
-        "Running low" to list.filter { status(it) == StockStatus.LOW },
-        "Refill needed" to list.filter { status(it) == StockStatus.OK },
-    ).filter { it.second.isNotEmpty() }
+    fun status(item: Item) = Pantry.status(state.entries(item.id), item.counting(), today)
+    // Grouped by where you usually buy each thing, so you finish one shop before the next.
+    val byShop = list.groupBy { Pantry.lastShop(state.entries(it.id)) }
+    val sections = shopOrder(byShop.keys).map { shop ->
+        shop to byShop[shop].orEmpty().sortedWith(compareBy<Item> { status(it).ordinal }.thenBy { it.name.lowercase() })
+    }
     val estimate = list.sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id), it.packSize) ?: 0L }
-    val hidden = state.items.filter { it.hiddenFromList && Pantry.status(state.entries(it.id), it.lowAt, today) != StockStatus.OK }
+    val hidden = state.items.filter { it.hiddenFromList && status(it) != StockStatus.OK }
 
     fun add() {
         val text = newText.trim()
@@ -492,7 +609,7 @@ private fun ShoppingList(
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item(key = "add") {
@@ -526,7 +643,8 @@ private fun ShoppingList(
             item(key = "summary") {
                 val count = list.size + state.notes.size
                 Text(
-                    "$count to buy" + if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "",
+                    "$count to buy" + (if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "") +
+                        if (list.isNotEmpty()) ". Tick what you bought, then tap Done shopping." else "",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp),
@@ -549,33 +667,32 @@ private fun ShoppingList(
                 }
             }
         }
-        sections.forEach { (title, items) ->
-            item(key = "section-$title") { SectionTitle(title) }
-            items.sortedBy { it.name.lowercase() }.forEach { row ->
+        sections.forEach { (shop, items) ->
+            item(key = "shop-$shop") { SectionTitle(if (shop.isEmpty()) "🛒  Anywhere · ${items.size}" else "🏪  $shop · ${items.size}") }
+            items.forEach { row ->
                 item(key = "buy-${row.id}") {
                     val entries = state.entries(row.id)
                     val unit = row.unitValue()
                     val buyAmount = Pantry.buyAmount(unit, entries, row.packSize)
                     val expected = Pantry.expectedPriceMinor(unit, entries, row.packSize)
-                    val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
+                    val isTicked = row.id in ticked
                     Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.padding(12.dp)) {
+                        Column(Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = isTicked, onCheckedChange = { onTick(row.id) })
                                 ItemImage(row.name, row.photoFile, size = 46.dp, category = row.category)
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    StockPill(stockLabel(row, Pantry.stock(entries)), Pantry.status(entries, row.lowAt, today))
+                                    StockPill(stockLabel(row, Pantry.stock(entries)), status(row))
                                     Text(
-                                        "Usually ${unit.label(buyAmount)}" +
-                                            (expected?.let { " · ${Money.format(it, currency)}" } ?: "") +
-                                            (if (shop.isNotBlank()) " at $shop" else ""),
+                                        "Usually ${unit.label(buyAmount)}" + (expected?.let { " · ${Money.format(it, currency)}" } ?: ""),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
-                            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                 var menu by remember { mutableStateOf(false) }
                                 Box {
                                     TextButton(onClick = { menu = true }) { Text("Not now") }
@@ -584,7 +701,7 @@ private fun ShoppingList(
                                             text = { Text("Hide until I buy it") },
                                             onClick = {
                                                 menu = false
-                                                if (row.refillNeeded && Pantry.status(entries, row.lowAt, today) == StockStatus.OK) {
+                                                if (row.refillNeeded && status(row) == StockStatus.OK) {
                                                     vm.setRefillNeeded(row, false)
                                                 } else {
                                                     vm.setHidden(row, true)
@@ -641,12 +758,16 @@ private fun SectionTitle(text: String) {
 /* ============================ Weekly summary ============================ */
 
 @Composable
-private fun WeekSummary(state: PantryState, today: LocalDate, currency: String, onOpen: (Long) -> Unit, modifier: Modifier) {
+private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDate, currency: String, onOpen: (Long) -> Unit, modifier: Modifier) {
     var offset by rememberSaveable { mutableLongStateOf(0L) }
+    val showSpending by vm.showSpending.collectAsStateWithLifecycle()
+    val budget by vm.budgetMinor.collectAsStateWithLifecycle()
     val start = Pantry.weekStart(today).minusWeeks(offset)
     val categoryOf: (Long) -> String = { id -> state.item(id)?.category ?: "Other" }
     val week = Pantry.week(start, state.entriesByItem, categoryOf)
     val previous = Pantry.week(start.minusWeeks(1), state.entriesByItem, categoryOf)
+    val bought = week.items.filter { it.bought > 0 }.sortedBy { state.item(it.itemId)?.name?.lowercase() }
+    val used = week.items.filter { it.used > 0 }
 
     LazyColumn(
         modifier = modifier,
@@ -669,45 +790,22 @@ private fun WeekSummary(state: PantryState, today: LocalDate, currency: String, 
             Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 val on = MaterialTheme.colorScheme.onPrimaryContainer
                 Column(Modifier.padding(16.dp)) {
-                    Text("Spent", style = MaterialTheme.typography.labelLarge, color = on)
-                    Text(Money.format(week.spentMinor, currency), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.SemiBold, color = on)
-                    val diff = week.spentMinor - previous.spentMinor
-                    if (previous.spentMinor > 0 || week.spentMinor > 0) {
-                        Text(
-                            when {
-                                diff > 0 -> "${Money.format(diff, currency)} more than the week before"
-                                diff < 0 -> "${Money.format(-diff, currency)} less than the week before"
-                                else -> "Same as the week before"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = on,
-                        )
-                    }
+                    Text(if (offset == 0L) "New this week" else "That week", style = MaterialTheme.typography.labelLarge, color = on)
+                    Text(
+                        when {
+                            week.itemsBought == 0 && week.itemsUsed == 0 -> "Nothing logged yet"
+                            week.itemsBought == 0 -> "${week.itemsUsed} item${if (week.itemsUsed == 1) "" else "s"} used"
+                            else -> "${week.itemsBought} thing${if (week.itemsBought == 1) "" else "s"} bought"
+                        },
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = on,
+                    )
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatTile(week.itemsUsed.toString(), "items used", Modifier.weight(1f))
+                        StatTile(week.itemsBought.toString(), "bought", Modifier.weight(1f))
+                        StatTile(week.itemsUsed.toString(), "used", Modifier.weight(1f))
                         StatTile(week.timesShared.toString(), "times shared", Modifier.weight(1f))
-                        StatTile(week.itemsBought.toString(), "items bought", Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-        if (week.spentByCategory.isNotEmpty()) {
-            item(key = "categories") {
-                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SectionLabel("Spent by category")
-                        val max = week.spentByCategory.values.maxOrNull() ?: 1L
-                        week.spentByCategory.entries.sortedByDescending { it.value }.forEach { (category, minor) ->
-                            Column {
-                                Row {
-                                    Text("${Categories.emojiFor(category)}  $category", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                                    Text(Money.format(minor, currency), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                LinearProgressIndicator(progress = { minor.toFloat() / max }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
-                            }
-                        }
                     }
                 }
             }
@@ -715,35 +813,94 @@ private fun WeekSummary(state: PantryState, today: LocalDate, currency: String, 
         if (week.items.isEmpty()) {
             item(key = "empty") {
                 Text(
-                    "Nothing used or bought this week.",
+                    "Nothing used or bought this week. Tap − or 🍳 Cook a meal when you use something, and it shows up here.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 16.dp).fillMaxWidth(),
                     textAlign = TextAlign.Center,
                 )
             }
-        } else {
-            item(key = "items-title") { SectionLabel("Items") }
-            week.items.forEach { w ->
+        }
+        if (bought.isNotEmpty()) {
+            item(key = "bought-title") { SectionLabel("Bought") }
+            bought.forEach { w ->
+                val thing = state.item(w.itemId) ?: return@forEach
+                item(key = "b-${w.itemId}") {
+                    WeekRow(thing, "Bought ${thing.unitValue().label(w.bought)}", if (showSpending && w.spentMinor > 0) Money.format(w.spentMinor, currency) else null) { onOpen(thing.id) }
+                }
+            }
+        }
+        if (used.isNotEmpty()) {
+            item(key = "used-title") { SectionLabel("Used") }
+            used.forEach { w ->
                 val thing = state.item(w.itemId) ?: return@forEach
                 val unit = thing.unitValue()
-                item(key = "w-${w.itemId}") {
-                    Card(onClick = { onOpen(thing.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            ItemImage(thing.name, thing.photoFile, size = 42.dp, category = thing.category)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(thing.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                                val parts = buildList {
-                                    if (w.used > 0) add("used ${unit.label(w.used)}" + if (w.shared > 0) " (${Qty.format(w.shared)} shared)" else "")
-                                    if (w.bought > 0) add("bought ${unit.label(w.bought)}")
+                item(key = "u-${w.itemId}") {
+                    WeekRow(thing, "Used ${unit.label(w.used)}" + if (w.shared > 0) " (${unit.label(w.shared)} shared)" else "", null) { onOpen(thing.id) }
+                }
+            }
+        }
+        // Money stays out of the way until you ask for it.
+        item(key = "spending-toggle") {
+            TextButton(onClick = { vm.setShowSpending(!showSpending) }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (showSpending) "Hide spending" else "Show spending")
+            }
+        }
+        if (showSpending) {
+            item(key = "spent") {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SectionLabel("Spent")
+                        Text(Money.format(week.spentMinor, currency), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                        if (previous.spentMinor > 0 || week.spentMinor > 0) {
+                            val diff = week.spentMinor - previous.spentMinor
+                            Hint(
+                                when {
+                                    diff > 0 -> "${Money.format(diff, currency)} more than the week before"
+                                    diff < 0 -> "${Money.format(-diff, currency)} less than the week before"
+                                    else -> "Same as the week before"
+                                },
+                            )
+                        }
+                        if (budget > 0) {
+                            val monthStart = today.withDayOfMonth(1)
+                            val month = Pantry.spentBetween(state.entriesByItem, monthStart, today)
+                            HorizontalDivider()
+                            Text("This month: ${Money.format(month, currency)} of ${Money.format(budget, currency)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            LinearProgressIndicator(progress = { (month.toFloat() / budget).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
+                            Hint(if (month <= budget) "${Money.format(budget - month, currency)} left this month" else "${Money.format(month - budget, currency)} over this month")
+                        }
+                        if (week.spentByCategory.isNotEmpty()) {
+                            HorizontalDivider()
+                            val max = week.spentByCategory.values.maxOrNull() ?: 1L
+                            week.spentByCategory.entries.sortedByDescending { it.value }.forEach { (category, minor) ->
+                                Column {
+                                    Row {
+                                        Text("${Categories.emojiFor(category)}  $category", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                        Text(Money.format(minor, currency), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    LinearProgressIndicator(progress = { minor.toFloat() / max }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
                                 }
-                                Text(parts.joinToString(" · ").replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            if (w.spentMinor > 0) Text(Money.format(w.spentMinor, currency), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WeekRow(item: Item, text: String, money: String?, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            ItemImage(item.name, item.photoFile, size = 42.dp, category = item.category)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(item.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (money != null) Text(money, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         }
     }
 }

@@ -17,7 +17,7 @@ import org.json.JSONObject
  */
 object Backup {
     private const val FORMAT = "kitchtally-backup"
-    private const val VERSION = 3
+    private const val VERSION = 4
 
     data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList())
 
@@ -38,7 +38,10 @@ object Backup {
                     .put("step", i.step)
                     .put("hiddenFromList", i.hiddenFromList)
                     .put("packSize", i.packSize)
-                    .put("unsure", i.unsure),
+                    .put("unsure", i.unsure)
+                    .put("countMeals", i.countMeals)
+                    .put("mealsPerUnit", i.mealsPerUnit)
+                    .put("lowInMeals", i.lowInMeals),
             )
         }
         val ids = items.map { it.id }.toSet()
@@ -102,6 +105,9 @@ object Backup {
                 hiddenFromList = o.optBoolean("hiddenFromList", false),
                 unsure = o.optBoolean("unsure", false),
                 packSize = o.optDouble("packSize", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
+                countMeals = o.optBoolean("countMeals", false),
+                mealsPerUnit = o.optDouble("mealsPerUnit", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
+                lowInMeals = o.optBoolean("lowInMeals", false),
             )
         }
         val refs = items.map { it.id }.toSet()

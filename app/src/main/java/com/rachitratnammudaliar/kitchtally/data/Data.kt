@@ -17,6 +17,7 @@ import androidx.room.Update
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.Counting
 import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
@@ -50,6 +51,13 @@ data class Item(
     // Added in database version 3 (app 1.2.0).
     /** Not sure whether to buy it again: never put on the shopping list until switched off. */
     val unsure: Boolean = false,
+    // Added in database version 4 (app 1.3.0).
+    /** Show how many meals are left. Off for salt, oil and the like. */
+    val countMeals: Boolean = false,
+    /** Meals one unit makes (one full packet for % items). 0 until set. */
+    val mealsPerUnit: Double = 0.0,
+    /** [lowAt] is counted in meals. */
+    val lowInMeals: Boolean = false,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -83,6 +91,12 @@ data class Event(
 )
 
 fun Item.unitValue(): QtyUnit = QtyUnit.fromName(unit)
+
+/** How this item is counted, for the stock rules. */
+fun Item.counting(): Counting {
+    val meals = if (countMeals) mealsPerUnit else 0.0
+    return Counting(unitValue(), lowAt, meals, lowInMeals && meals > 0)
+}
 
 fun Item.lifeValue(): Life = Life.fromName(life)
 
@@ -193,7 +207,16 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 3, exportSchema = false)
+/** Version 3 -> 4 (app 1.2 -> 1.3.0): counting meals, and "running low at" in meals. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE items ADD COLUMN countMeals INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN mealsPerUnit REAL NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN lowInMeals INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -206,7 +229,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build().also { instance = it }
             }
     }

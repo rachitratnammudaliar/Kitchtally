@@ -13,16 +13,49 @@ import java.util.Locale
 // Pure logic, no Android. The iOS app has a Swift port of this file with the same tests.
 
 /** How an item is counted. Stored by [name]. */
-enum class QtyUnit(val singular: String, val plural: String, val priceLabel: String) {
-    PIECE("piece", "pieces", "each"),
-    PACKET("packet", "packets", "per packet"),
-    BOTTLE("bottle", "bottles", "per bottle"),
-    BOX("box", "boxes", "per box"),
-    BAG("bag", "bags", "per bag"),
-    KG("kg", "kg", "per kg"),
-    LITRE("litre", "litres", "per litre");
+enum class QtyUnit(
+    val singular: String,
+    val plural: String,
+    val priceLabel: String,
+    /** Name on the "Counted in" chips. */
+    val title: String,
+    /** Prices are shown per kg or litre, so grams and millilitres divide by 1000. */
+    val priceDivisor: Int = 1,
+) {
+    PIECE("piece", "pieces", "each", "Pieces"),
+    PACKET("packet", "packets", "per packet", "Packets"),
+    BOTTLE("bottle", "bottles", "per bottle", "Bottles"),
+    BOX("box", "boxes", "per box", "Boxes"),
+    BAG("bag", "bags", "per bag", "Bags"),
+    /** How full it is: 1 = one full packet or bottle, 0.25 = a quarter left. */
+    LEVEL("full one", "full ones", "each", "% left"),
+    GRAM("g", "g", "per kg", "Grams", 1000),
+    KG("kg", "kg", "per kg", "Kg"),
+    ML("ml", "ml", "per litre", "Ml", 1000),
+    LITRE("litre", "litres", "per litre", "Litres");
 
-    fun label(qty: Double): String = "${Qty.format(qty)} ${if (qty == 1.0) singular else plural}"
+    val isLevel: Boolean get() = this == LEVEL
+    val byWeight: Boolean get() = this == GRAM || this == KG || this == ML || this == LITRE
+
+    /** An amount: "2 packets", "500 g", and for % items "25%", "1 full", "1 full + 50%". */
+    fun label(qty: Double): String {
+        if (!isLevel) return "${Qty.format(qty)} ${if (qty == 1.0) singular else plural}"
+        val whole = Math.floor(Qty.round(qty) + 1e-9).toInt()
+        val pct = Qty.percent(qty - whole)
+        return when {
+            whole == 0 -> "$pct%"
+            pct == 0 -> "$whole full"
+            else -> "$whole full + $pct%"
+        }
+    }
+
+    /** What's left: "2 packets left", "80% left", "Full", "2 full". */
+    fun leftLabel(stock: Double): String = when {
+        !isLevel -> "${label(stock)} left"
+        Qty.round(stock) == 1.0 -> "Full"
+        stock < 1 -> "${label(stock)} left"
+        else -> label(stock)
+    }
 
     companion object {
         fun fromName(name: String): QtyUnit = entries.firstOrNull { it.name == name } ?: PIECE
@@ -31,9 +64,9 @@ enum class QtyUnit(val singular: String, val plural: String, val priceLabel: Str
 
 /** Roughly how long an item lasts once bought. Used for the "check it's fresh" hint. */
 enum class Life(val label: String, val description: String, val freshDays: Long) {
-    SHORT("Short", "Days, like bread or milk", 5),
-    MEDIUM("Medium", "1 to 3 weeks, like onions or eggs", 21),
-    LONG("Long", "Months, like rice, atta or pasta", 180);
+    SHORT("Short", "2 to 3 days, like bread or milk", 3),
+    MEDIUM("Medium", "1 week to 10 days, like vegetables or eggs", 10),
+    LONG("Long", "2 weeks to a month or more, like rice, salt or oil. No freshness reminder", 30);
 
     companion object {
         fun fromName(name: String): Life = entries.firstOrNull { it.name == name } ?: MEDIUM
@@ -55,7 +88,43 @@ enum class EventType {
     }
 }
 
-enum class StockStatus { OUT, LOW, OK }
+/** OUT: none left. LAST: only one meal left (red). LOW: running low. OK: plenty. */
+enum class StockStatus { OUT, LAST, LOW, OK }
+
+/** How an item is counted and when it's low, independent of the database. */
+data class Counting(
+    val unit: QtyUnit = QtyUnit.PIECE,
+    val lowAt: Double = 1.0,
+    /** Meals one unit makes (one full packet for % items); 0 if not counting meals. */
+    val mealsPerUnit: Double = 0.0,
+    /** [lowAt] is in meals instead of the item's unit. */
+    val lowInMeals: Boolean = false,
+) {
+    val countsMeals: Boolean get() = mealsPerUnit > 0
+}
+
+object Meals {
+    fun left(stock: Double, mealsPerUnit: Double): Double = Qty.round(maxOf(0.0, stock) * mealsPerUnit)
+
+    /** "about 6 meals", "1 meal", "less than 1 meal", "no meals". */
+    fun label(meals: Double): String {
+        val whole = Math.floor(Qty.round(meals) + 1e-9).toLong()
+        return when {
+            meals <= 0 -> "no meals"
+            whole == 0L -> "less than 1 meal"
+            whole == 1L -> "1 meal"
+            else -> "about $whole meals"
+        }
+    }
+
+    /** What cooking one meal takes: one meal's worth when meals are counted, otherwise one tap. */
+    fun cookAmount(step: Double, mealsPerUnit: Double): Double =
+        if (mealsPerUnit > 0) Qty.round(1.0 / mealsPerUnit).coerceAtLeast(0.001) else step
+
+    /** Meals per unit from "these 5 onions make about 8 meals". Null if either is missing. */
+    fun perUnit(quantity: Double, meals: Double): Double? =
+        if (quantity > 0 && meals > 0) BigDecimal.valueOf(meals).divide(BigDecimal.valueOf(quantity), 4, RoundingMode.HALF_UP).toDouble() else null
+}
 
 /** One logged change, independent of the database. */
 data class Entry(
@@ -92,34 +161,39 @@ object Categories {
 }
 
 /** What a new item probably is, from its name: category, how it's counted, how long it lasts. */
-data class Suggestion(val category: String, val unit: QtyUnit, val life: Life, val packSize: Double = 0.0)
+data class Suggestion(val category: String, val unit: QtyUnit, val life: Life, val packSize: Double = 0.0, val countMeals: Boolean = false)
 
 object Suggestions {
-    private fun s(category: String, unit: QtyUnit, life: Life, packSize: Double = 0.0) = Suggestion(category, unit, life, packSize)
+    private fun s(category: String, unit: QtyUnit, life: Life, packSize: Double = 0.0, meals: Boolean = false) = Suggestion(category, unit, life, packSize, meals)
 
     // Checked in order, so more specific names come first: "garlic sauce" is a sauce,
     // "eggplant" a vegetable, "hair oil" personal care, "peanut butter" a spread.
     private val rules: List<Pair<List<String>, Suggestion>> = listOf(
-        listOf("ice cream") to s("Snacks", QtyUnit.PACKET, Life.MEDIUM),
+        listOf("ice cream") to s("Snacks", QtyUnit.LEVEL, Life.LONG),
         listOf("toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin") to s("Household", QtyUnit.PACKET, Life.LONG),
-        listOf("dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach", "sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper") to s("Household", QtyUnit.BOTTLE, Life.LONG),
-        listOf("body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "toothbrush", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "razor", "shaving", "lip balm", "hair oil", "hair gel", "sanitary", "pads", "cotton") to s("Personal care", QtyUnit.PIECE, Life.LONG),
-        listOf("sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto") to s("Sauces & spreads", QtyUnit.BOTTLE, Life.LONG),
-        listOf("veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint") to s("Vegetables", QtyUnit.PACKET, Life.SHORT),
-        listOf("onion", "potato", "garlic", "ginger", "pumpkin") to s("Vegetables", QtyUnit.KG, Life.MEDIUM),
-        listOf("carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili") to s("Vegetables", QtyUnit.KG, Life.SHORT),
-        listOf("apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach") to s("Fruit", QtyUnit.PIECE, Life.SHORT),
-        listOf("egg") to s("Dairy & eggs", QtyUnit.PIECE, Life.MEDIUM, 10.0),
-        listOf("milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly") to s("Dairy & eggs", QtyUnit.BOTTLE, Life.SHORT),
-        listOf("yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr") to s("Dairy & eggs", QtyUnit.PIECE, Life.SHORT),
-        listOf("cheese", "butter", "ghee", "paneer", "cream") to s("Dairy & eggs", QtyUnit.PACKET, Life.MEDIUM),
-        listOf("chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince") to s("Meat & protein", QtyUnit.PACKET, Life.SHORT),
-        listOf("bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav") to s("Bread & bakery", QtyUnit.PACKET, Life.SHORT),
-        listOf("masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing") to s("Spices", QtyUnit.PACKET, Life.LONG),
-        listOf("rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa") to s("Staples", QtyUnit.KG, Life.LONG),
-        listOf("oil") to s("Staples", QtyUnit.BOTTLE, Life.LONG),
-        listOf("pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "oats", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "salt", "sugar", "cereal", "cornflakes", "muesli", "vermicelli") to s("Staples", QtyUnit.PACKET, Life.LONG),
-        listOf("coffee", "tea", "chai") to s("Drinks", QtyUnit.PACKET, Life.LONG),
+        listOf("sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper") to s("Household", QtyUnit.PACKET, Life.LONG),
+        listOf("dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach") to s("Household", QtyUnit.LEVEL, Life.LONG),
+        listOf("toothbrush", "razor", "shaving", "sanitary", "pads", "cotton") to s("Personal care", QtyUnit.PIECE, Life.LONG),
+        listOf("body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "hair oil", "hair gel") to s("Personal care", QtyUnit.LEVEL, Life.LONG),
+        listOf("sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto") to s("Sauces & spreads", QtyUnit.LEVEL, Life.LONG),
+        listOf("veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint") to s("Vegetables", QtyUnit.LEVEL, Life.MEDIUM, meals = true),
+        listOf("chilli powder", "chili powder", "chilli flakes", "chili flakes") to s("Spices", QtyUnit.LEVEL, Life.LONG),
+        listOf("garlic", "ginger") to s("Vegetables", QtyUnit.PIECE, Life.LONG),
+        listOf("onion", "potato", "carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "pumpkin", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili") to s("Vegetables", QtyUnit.PIECE, Life.MEDIUM, meals = true),
+        listOf("apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach") to s("Fruit", QtyUnit.PIECE, Life.MEDIUM),
+        listOf("egg") to s("Dairy & eggs", QtyUnit.PIECE, Life.MEDIUM, 10.0, meals = true),
+        listOf("milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly") to s("Dairy & eggs", QtyUnit.LEVEL, Life.SHORT),
+        listOf("yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr") to s("Dairy & eggs", QtyUnit.PIECE, Life.MEDIUM),
+        listOf("cheese", "butter", "ghee", "paneer", "cream") to s("Dairy & eggs", QtyUnit.LEVEL, Life.MEDIUM),
+        listOf("chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince") to s("Meat & protein", QtyUnit.PACKET, Life.SHORT, meals = true),
+        listOf("bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav") to s("Bread & bakery", QtyUnit.LEVEL, Life.SHORT),
+        listOf("masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing") to s("Spices", QtyUnit.LEVEL, Life.LONG),
+        listOf("rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa") to s("Staples", QtyUnit.KG, Life.LONG, meals = true),
+        listOf("oil") to s("Staples", QtyUnit.LEVEL, Life.LONG),
+        listOf("salt", "sugar") to s("Staples", QtyUnit.LEVEL, Life.LONG),
+        listOf("oats", "cereal", "cornflakes", "muesli") to s("Staples", QtyUnit.LEVEL, Life.LONG, meals = true),
+        listOf("pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "vermicelli") to s("Staples", QtyUnit.PACKET, Life.LONG, meals = true),
+        listOf("coffee", "tea", "chai") to s("Drinks", QtyUnit.LEVEL, Life.LONG),
         listOf("juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi") to s("Drinks", QtyUnit.BOTTLE, Life.MEDIUM),
         listOf("chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake") to s("Snacks", QtyUnit.PACKET, Life.LONG),
     )
@@ -156,6 +230,9 @@ object Shops {
 object Qty {
     fun round(q: Double): Double = BigDecimal.valueOf(q).setScale(3, RoundingMode.HALF_UP).toDouble()
 
+    /** 0.8 -> 80. */
+    fun percent(fraction: Double): Int = BigDecimal.valueOf(fraction).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toInt()
+
     fun format(q: Double): String =
         BigDecimal.valueOf(round(q)).stripTrailingZeros().toPlainString().let { if (it == "-0") "0" else it }
 
@@ -182,8 +259,24 @@ object Pantry {
         },
     )
 
-    /** Default "uses per tap": half a kilo or litre, otherwise one. */
-    fun defaultStep(unit: QtyUnit): Double = if (unit == QtyUnit.KG || unit == QtyUnit.LITRE) 0.5 else 1.0
+    /** Default "uses per tap": half a kilo or litre, 100 g or ml, a quarter of a % item, otherwise one. */
+    fun defaultStep(unit: QtyUnit): Double = when (unit) {
+        QtyUnit.KG, QtyUnit.LITRE -> 0.5
+        QtyUnit.GRAM, QtyUnit.ML -> 100.0
+        QtyUnit.LEVEL -> 0.25
+        else -> 1.0
+    }
+
+    /** Default "running low at": 25% for % items, 200 g or ml, half a kilo or litre, otherwise one. */
+    fun defaultLowAt(unit: QtyUnit): Double = when (unit) {
+        QtyUnit.LEVEL -> 0.25
+        QtyUnit.GRAM, QtyUnit.ML -> 200.0
+        QtyUnit.KG, QtyUnit.LITRE -> 0.5
+        else -> 1.0
+    }
+
+    /** Default "running low at" when counting in meals. */
+    const val DEFAULT_LOW_MEALS = 2.0
 
     /** What one tap of − or Shared takes: the item's step, never more than what's left. */
     fun useAmount(step: Double, stock: Double): Double = Qty.round(minOf(step.coerceAtLeast(0.001), stock)).coerceAtLeast(0.0)
@@ -195,7 +288,7 @@ object Pantry {
      */
     fun buyAmount(unit: QtyUnit, entries: List<Entry>, packSize: Double = 0.0): Double = when {
         packSize > 0 -> packSize
-        unit == QtyUnit.KG || unit == QtyUnit.LITRE -> lastBought(entries)?.quantity?.takeIf { it > 0 } ?: 1.0
+        unit.byWeight -> lastBought(entries)?.quantity?.takeIf { it > 0 } ?: if (unit.priceDivisor > 1) 500.0 else 1.0
         else -> 1.0
     }
 
@@ -233,16 +326,41 @@ object Pantry {
     fun lastPriced(entries: List<Entry>): Entry? =
         entries.filter { it.type == EventType.BOUGHT && it.priceMinor != null && it.quantity > 0 }.maxByOrNull { it.date }
 
-    /** Price per unit (per kg, per packet...) of a purchase, rounded to the cent. */
-    fun unitPriceMinor(e: Entry): Long? {
+    /** Price per unit (per kg, per packet...) of a purchase, rounded to the cent. Grams and ml give per kg and per litre. */
+    fun unitPriceMinor(e: Entry, unit: QtyUnit = QtyUnit.PIECE): Long? {
         val price = e.priceMinor ?: return null
         if (e.quantity <= 0) return null
-        return BigDecimal.valueOf(price).divide(BigDecimal.valueOf(e.quantity), 0, RoundingMode.HALF_UP).toLong()
+        return BigDecimal.valueOf(price).multiply(BigDecimal.valueOf(unit.priceDivisor.toLong()))
+            .divide(BigDecimal.valueOf(e.quantity), 0, RoundingMode.HALF_UP).toLong()
     }
 
-    /** Total for a quantity at a unit price: 1.5 kg at €1.20/kg = €1.80. */
-    fun totalMinor(unitPriceMinor: Long, quantity: Double): Long =
-        BigDecimal.valueOf(unitPriceMinor).multiply(BigDecimal.valueOf(quantity)).setScale(0, RoundingMode.HALF_UP).toLong()
+    /** Total for a quantity at a unit price: 1.5 kg at €1.20/kg = €1.80; 500 g at €2/kg = €1. */
+    fun totalMinor(unitPriceMinor: Long, quantity: Double, unit: QtyUnit = QtyUnit.PIECE): Long =
+        BigDecimal.valueOf(unitPriceMinor).multiply(BigDecimal.valueOf(quantity))
+            .divide(BigDecimal.valueOf(unit.priceDivisor.toLong()), 0, RoundingMode.HALF_UP).toLong()
+
+    /** The shop it was last bought at, or "" if never or not noted. */
+    fun lastShop(entries: List<Entry>): String =
+        entries.filter { it.type == EventType.BOUGHT && it.shop.isNotBlank() }.maxByOrNull { it.date }?.shop?.trim() ?: ""
+
+    data class Cheaper(val shop: String, val unitPriceMinor: Long)
+
+    /**
+     * The cheapest other shop, by its latest unit price in the last [days] days, if it was cheaper
+     * than [unitPriceMinor] at [shop]. Null if nowhere else was cheaper.
+     */
+    fun cheaperElsewhere(entries: List<Entry>, unit: QtyUnit, unitPriceMinor: Long, shop: String, today: LocalDate, days: Long = 180): Cheaper? {
+        val from = today.minusDays(days)
+        return entries
+            .filter { it.type == EventType.BOUGHT && it.shop.isNotBlank() && !it.shop.trim().equals(shop.trim(), ignoreCase = true) && !it.date.isBefore(from) }
+            .groupBy { it.shop.trim().lowercase() }
+            .mapNotNull { (_, list) ->
+                val latest = list.filter { it.priceMinor != null }.maxByOrNull { it.date } ?: return@mapNotNull null
+                unitPriceMinor(latest, unit)?.let { Cheaper(latest.shop.trim(), it) }
+            }
+            .filter { it.unitPriceMinor < unitPriceMinor }
+            .minByOrNull { it.unitPriceMinor }
+    }
 
     /**
      * Average amount used per day over the last [windowDays], counted from the first use in that
@@ -268,10 +386,25 @@ object Pantry {
     }
 
     /** Out at zero; low at or below [lowAt], or when it's likely to run out within 2 days. */
-    fun status(entries: List<Entry>, lowAt: Double, today: LocalDate): StockStatus {
+    fun status(entries: List<Entry>, lowAt: Double, today: LocalDate): StockStatus =
+        status(entries, Counting(lowAt = lowAt), today)
+
+    /**
+     * Out at zero. When counting meals: red (LAST) with one meal or less left. Low at or below
+     * "running low at", in meals or in the item's unit. Items counted in pieces, packets or kilos
+     * are also low when they'll likely run out within 2 days; % and meal items only by their own
+     * threshold, so they don't nag early.
+     */
+    fun status(entries: List<Entry>, counting: Counting, today: LocalDate): StockStatus {
         val stock = stock(entries)
         if (stock <= 0) return StockStatus.OUT
-        if (stock <= lowAt) return StockStatus.LOW
+        if (counting.countsMeals) {
+            val meals = Meals.left(stock, counting.mealsPerUnit)
+            if (meals <= 1.0) return StockStatus.LAST
+            if (counting.lowInMeals && meals <= counting.lowAt) return StockStatus.LOW
+        }
+        if (!(counting.lowInMeals && counting.countsMeals) && stock <= counting.lowAt) return StockStatus.LOW
+        if (counting.unit.isLevel || counting.countsMeals) return StockStatus.OK
         val left = daysLeft(entries, today)
         if (left != null && left <= 2) return StockStatus.LOW
         return StockStatus.OK
@@ -336,6 +469,12 @@ object Pantry {
             itemsBought = items.count { it.bought > 0 },
         )
     }
+
+    /** Total paid for everything bought from [from] to [to], both included. */
+    fun spentBetween(entriesByItem: Map<Long, List<Entry>>, from: LocalDate, to: LocalDate): Long =
+        entriesByItem.values.sumOf { entries ->
+            entries.filter { it.type == EventType.BOUGHT && !it.date.isBefore(from) && !it.date.isAfter(to) }.sumOf { it.priceMinor ?: 0 }
+        }
 
     fun daysAgoLabel(date: LocalDate, today: LocalDate): String {
         val days = ChronoUnit.DAYS.between(date, today)
