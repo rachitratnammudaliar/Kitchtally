@@ -32,7 +32,7 @@ struct AdjustSheet: View {
         }
     }
 
-    private var amountSheet: some View {
+    @ViewBuilder private var amountSheet: some View {
         let unit = item.unitValue
         let stock = store.stock(item.id)
         let hint = Pantry.packsHint(stock, item.packSize)

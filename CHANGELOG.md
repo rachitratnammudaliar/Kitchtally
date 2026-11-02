@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.0
+
+**New**
+- **% left:** count bread, oil, ketchup and opened packets as "80% left" instead of "1 packet". Tap the amount to pick 100 / 75 / 50 / 25% / Empty or type any %
+- **Grams and millilitres**, still priced per kg and per litre
+- **Meals:** "Count meals" shows "4 pieces left · about 6 meals" and turns red when one meal is left. Set it on the item or when you buy ("these make about 8 meals"). Running low can be set in meals (e.g. 2 meals) or in % (e.g. 10% for oil)
+- **🍳 Cook a meal:** tick what you cooked with; one meal comes off each in one tap
+- **"Almost out" line** under items at their low point, no notifications
+- **Shopping list by shop**, with ticks and **Done shopping** to log everything at once, and **Share** to send the list as text
+- **Price check:** shows when another shop was cheaper last time
+- **Home screen widget** (Android): To buy count and what's almost out
+- **Optional monthly budget** under Weekly → Show spending
+
+**Changed**
+- Money is out of sight: the Pantry no longer shows what you spent, and Weekly opens with what's new this week. Spending is one tap away
+- How long things last: Short is 2 to 3 days, Medium 1 week to 10 days, Long 2 weeks or more (no freshness reminder)
+- New items fill in better: onions, potatoes, carrots and tomatoes in pieces; bread, oil, sauces, milk and spices in %; meals counted for vegetables, pasta, rice, eggs and meat
+- Items counted in % or meals only say "almost out" at their own low point, never earlier
+
 ## 1.2.1
 
 - **Fixed:** adding a photo on Android always said "That photo couldn't be used". Photos from the gallery, Downloads and the camera now work, including JPEG, PNG, WebP and HEIC
