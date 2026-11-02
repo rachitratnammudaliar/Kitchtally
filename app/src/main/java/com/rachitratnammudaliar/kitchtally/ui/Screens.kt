@@ -215,6 +215,8 @@ fun KitchtallyRoot(
     }
     /** Where the purchase screen returns to. */
     var back by rememberSaveable { mutableStateOf("") }
+    /** Items ticked on the To buy list; kept while you open an item or a purchase mid-shop. */
+    var ticked by rememberSaveable { mutableStateOf(listOf<Long>()) }
 
     var today by remember { mutableStateOf(LocalDate.now()) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -269,6 +271,8 @@ fun KitchtallyRoot(
             onSettings = { route = "settings" },
             openCook = openCook,
             openAdjust = openAdjust,
+            ticked = ticked,
+            onTicked = { ticked = it },
         )
     }
 }
@@ -287,14 +291,14 @@ private fun MainTabs(
     onSettings: () -> Unit,
     openCook: Boolean = false,
     openAdjust: Long = 0L,
+    ticked: List<Long> = emptyList(),
+    onTicked: (List<Long>) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     val toBuy = state?.items?.count { onShoppingList(it, state, today) } ?: 0
     var cooking by rememberSaveable { mutableStateOf(openCook) }
-    /** Items ticked on the To buy list, for "Done shopping". */
-    var ticked by rememberSaveable { mutableStateOf(listOf<Long>()) }
     val tickedNow = state?.let { s -> ticked.filter { id -> s.item(id)?.let { onShoppingList(it, s, today) } == true } }.orEmpty()
 
     if (cooking && state != null) {
@@ -350,7 +354,7 @@ private fun MainTabs(
                 ExtendedFloatingActionButton(
                     onClick = {
                         val items = tickedNow.mapNotNull { state.item(it) }
-                        ticked = emptyList()
+                        onTicked(emptyList())
                         vm.doneShopping(state, items) { message, undo -> scope.undoSnackbar(snackbar, message, undo) }
                     },
                     icon = { Icon(Icons.Default.Check, contentDescription = null) },
@@ -363,7 +367,7 @@ private fun MainTabs(
         val s = state ?: return@Scaffold
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (tab) {
-            "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> ticked = if (id in ticked) ticked - id else ticked + id }, onOpen, onBuy, modifier)
+            "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
             else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
         }
