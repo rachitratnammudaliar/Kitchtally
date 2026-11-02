@@ -3,6 +3,8 @@
 ## 1.1.0
 
 **New**
+- Packs: count eggs in pieces and set "packs of 10". ＋ adds a whole pack, − takes one egg, and purchases can be entered in packs
+- Change any amount at once: tap an item's amount (or "Change amount…") for −2, −1, +1, +2 or a typed number, then choose Used, Shared, Bought, or set what's left
 - Shopping list: type anything at the top, even things that aren't in your pantry, and tick them off. Typing a pantry item's name marks that item instead
 - "Not now" on the shopping list hides an item until you next buy it
 - Search your pantry

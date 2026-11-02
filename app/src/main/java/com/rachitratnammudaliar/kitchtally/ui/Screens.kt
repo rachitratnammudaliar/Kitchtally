@@ -287,6 +287,13 @@ private fun PantryList(
     val scope = rememberCoroutineScope()
     var filter by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf("") }
+    var adjusting by rememberSaveable { mutableLongStateOf(0L) }
+    state.item(adjusting)?.let { target ->
+        AdjustDialog(target, state.stock(target.id), onDismiss = { adjusting = 0L }) { action, amount ->
+            adjusting = 0L
+            vm.adjust(state, target, action, amount) { message, undo -> scope.undoSnackbar(snackbar, "$message of ${target.name}", undo) }
+        }
+    }
     if (state.items.isEmpty()) {
         Column(modifier.padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Nothing here yet", style = MaterialTheme.typography.titleLarge)
@@ -400,6 +407,7 @@ private fun PantryList(
                                 scope.undoSnackbar(snackbar, "Added ${row.unitValue().label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
                             }
                         },
+                        onAdjust = { adjusting = row.id },
                     )
                 }
             }
@@ -408,7 +416,7 @@ private fun PantryList(
 }
 
 @Composable
-private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: () -> Unit, onUse: () -> Unit, onShare: () -> Unit, onBuy: () -> Unit) {
+private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: () -> Unit, onUse: () -> Unit, onShare: () -> Unit, onBuy: () -> Unit, onAdjust: () -> Unit) {
     val entries = state.entries(item.id)
     val stock = Pantry.stock(entries)
     val status = Pantry.status(entries, item.lowAt, today)
@@ -424,7 +432,7 @@ private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: (
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StockPill(stockLabel(item, stock) + if (item.refillNeeded && status == StockStatus.OK) " · refill" else "", status)
+                StockPill(stockLabel(item, stock) + (if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
                 Text(detailLine(item, state, today), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             OutlinedIconButton(onClick = onShare, enabled = stock > 0, modifier = Modifier.size(40.dp)) {
@@ -464,7 +472,7 @@ private fun ShoppingList(
         "Running low" to list.filter { status(it) == StockStatus.LOW },
         "Refill needed" to list.filter { status(it) == StockStatus.OK },
     ).filter { it.second.isNotEmpty() }
-    val estimate = list.sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id)) ?: 0L }
+    val estimate = list.sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id), it.packSize) ?: 0L }
     val hidden = state.items.filter { it.hiddenFromList && Pantry.status(state.entries(it.id), it.lowAt, today) != StockStatus.OK }
 
     fun add() {
@@ -541,8 +549,8 @@ private fun ShoppingList(
                 item(key = "buy-${row.id}") {
                     val entries = state.entries(row.id)
                     val unit = row.unitValue()
-                    val buyAmount = Pantry.buyAmount(unit, entries)
-                    val expected = Pantry.expectedPriceMinor(unit, entries)
+                    val buyAmount = Pantry.buyAmount(unit, entries, row.packSize)
+                    val expected = Pantry.expectedPriceMinor(unit, entries, row.packSize)
                     val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
                     Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                         Column(Modifier.padding(12.dp)) {

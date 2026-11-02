@@ -129,16 +129,36 @@ object Pantry {
     fun useAmount(step: Double, stock: Double): Double = Qty.round(minOf(step.coerceAtLeast(0.001), stock)).coerceAtLeast(0.0)
 
     /**
-     * What one tap of ＋ adds: one of anything you count; for kilos and litres, the size you
-     * usually buy (the last purchase), so a 5 kg bag of rice adds 5 kg.
+     * What one tap of ＋ adds: a whole pack if the item comes in packs (10 eggs); for kilos and
+     * litres, the size you usually buy (the last purchase), so a 5 kg bag of rice adds 5 kg;
+     * otherwise one.
      */
-    fun buyAmount(unit: QtyUnit, entries: List<Entry>): Double =
-        if (unit == QtyUnit.KG || unit == QtyUnit.LITRE) lastBought(entries)?.quantity?.takeIf { it > 0 } ?: 1.0 else 1.0
+    fun buyAmount(unit: QtyUnit, entries: List<Entry>, packSize: Double = 0.0): Double = when {
+        packSize > 0 -> packSize
+        unit == QtyUnit.KG || unit == QtyUnit.LITRE -> lastBought(entries)?.quantity?.takeIf { it > 0 } ?: 1.0
+        else -> 1.0
+    }
 
     /** The expected price of [buyAmount] at the last price paid, or null if no price is known. */
-    fun expectedPriceMinor(unit: QtyUnit, entries: List<Entry>): Long? {
+    fun expectedPriceMinor(unit: QtyUnit, entries: List<Entry>, packSize: Double = 0.0): Long? =
+        priceFor(entries, buyAmount(unit, entries, packSize))
+
+    /** The price of [quantity] at the last unit price paid, or null if no price is known. */
+    fun priceFor(entries: List<Entry>, quantity: Double): Long? {
         val unitPrice = lastPriced(entries)?.let { unitPriceMinor(it) } ?: return null
-        return totalMinor(unitPrice, buyAmount(unit, entries))
+        return totalMinor(unitPrice, quantity)
+    }
+
+    /** "1 pack = 10 pieces", or "" if not bought in packs. */
+    fun packLabel(unit: QtyUnit, packSize: Double): String =
+        if (packSize > 0) "1 pack = ${unit.label(packSize)}" else ""
+
+    /** "8 pieces (about 1 pack)" style extra for pack items, or "". */
+    fun packsHint(stock: Double, packSize: Double): String {
+        if (packSize <= 0 || stock <= 0) return ""
+        val packs = stock / packSize
+        val text = if (packs >= 2) Math.round(packs).toString() else Qty.format(BigDecimal.valueOf(packs).setScale(1, RoundingMode.HALF_UP).toDouble())
+        return "about $text pack${if (text == "1") "" else "s"}"
     }
 
     fun lastBought(entries: List<Entry>): Entry? =

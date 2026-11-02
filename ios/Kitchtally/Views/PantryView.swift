@@ -102,6 +102,7 @@ struct ItemRow: View {
     let today: Day
     @Binding var undo: UndoState?
     let onOpen: () -> Void
+    @State private var adjusting = false
 
     var body: some View {
         let stock = store.stock(item.id)
@@ -112,7 +113,7 @@ struct ItemRow: View {
                 ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 50)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name).font(.headline).lineLimit(1)
-                    StockPill(text: stockLabel(item, stock) + (item.refillNeeded && status == .ok ? " · refill" : ""), status: status)
+                    StockPill(text: stockLabel(item, stock) + (item.refillNeeded && status == .ok ? " · refill" : "") + "  ±", status: status) { adjusting = true }
                     Text(detailLine(item, store, today)).font(.caption).foregroundColor(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -143,5 +144,8 @@ struct ItemRow: View {
             .controlSize(.small)
         }
         .padding(.vertical, 4)
+        .sheet(isPresented: $adjusting) {
+            AdjustSheet(item: item) { message, action in showUndo($undo, "\(message) of \(item.name)", action) }
+        }
     }
 }

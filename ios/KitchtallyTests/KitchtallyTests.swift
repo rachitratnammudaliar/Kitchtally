@@ -88,6 +88,17 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertNil(Pantry.expectedPriceMinor(.KG, [bought(1, 2)]))
     }
 
+    func testPacks() {
+        let eggs = [bought(5, 10, 289, "IKI"), used(3, 2)]
+        XCTAssertEqual(Pantry.buyAmount(.PIECE, eggs, packSize: 10), 10)
+        XCTAssertEqual(Pantry.expectedPriceMinor(.PIECE, eggs, packSize: 10), 289)
+        XCTAssertEqual(Pantry.priceFor(eggs, 2), 58)
+        XCTAssertEqual(Pantry.packLabel(.PIECE, 10), "1 pack = 10 pieces")
+        XCTAssertEqual(Pantry.packsHint(8, 10), "about 0.8 packs")
+        XCTAssertEqual(Pantry.packsHint(10, 10), "about 1 pack")
+        XCTAssertEqual(Pantry.packsHint(25, 10), "about 3 packs")
+    }
+
     func testQuantitiesMoneyAndShops() {
         XCTAssertEqual(Qty.format(1.5), "1.5")
         XCTAssertEqual(Qty.format(2), "2")
@@ -135,6 +146,7 @@ final class KitchtallyTests: XCTestCase {
         var items = c.items
         items[0].step = 0.25
         items[0].hiddenFromList = true
+        items[0].packSize = 5
         let again = try Backup.decode(Backup.encode(items, c.events, notes: [ShoppingNote(text: "Candles", createdAt: 9)]))
         XCTAssertEqual(again.items, items)
         XCTAssertEqual(again.notes.map(\.text), ["Candles"])

@@ -104,6 +104,21 @@ class PantryTest {
     }
 
     @Test
+    fun packs() {
+        // Eggs: counted in pieces, bought in packs of 10 for €2.89
+        val eggs = listOf(bought(5, 10.0, 289, "IKI"), used(3, 2.0))
+        assertEquals(10.0, Pantry.buyAmount(QtyUnit.PIECE, eggs, 10.0), 0.0)
+        assertEquals(289L, Pantry.expectedPriceMinor(QtyUnit.PIECE, eggs, 10.0))
+        assertEquals(58L, Pantry.priceFor(eggs, 2.0))
+        assertEquals("1 pack = 10 pieces", Pantry.packLabel(QtyUnit.PIECE, 10.0))
+        assertEquals("", Pantry.packLabel(QtyUnit.PIECE, 0.0))
+        assertEquals("about 0.8 packs", Pantry.packsHint(8.0, 10.0))
+        assertEquals("about 1 pack", Pantry.packsHint(10.0, 10.0))
+        assertEquals("about 3 packs", Pantry.packsHint(25.0, 10.0))
+        assertEquals("", Pantry.packsHint(0.0, 10.0))
+    }
+
+    @Test
     fun quantitiesAndMoney() {
         assertEquals("1.5", Qty.format(1.5))
         assertEquals("2", Qty.format(2.0))

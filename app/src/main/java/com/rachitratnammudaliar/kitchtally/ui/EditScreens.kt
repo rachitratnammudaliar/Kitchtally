@@ -153,6 +153,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var life by rememberSaveable { mutableStateOf(Life.MEDIUM.name) }
     var lowAt by rememberSaveable { mutableStateOf("1") }
     var stepText by rememberSaveable { mutableStateOf("") }
+    var packText by rememberSaveable { mutableStateOf("") }
     var stockText by rememberSaveable { mutableStateOf("") }
     var refill by rememberSaveable { mutableStateOf(false) }
     var notes by rememberSaveable { mutableStateOf("") }
@@ -168,6 +169,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             life = existing.life
             lowAt = Qty.format(existing.lowAt)
             stepText = Qty.format(existing.step)
+            packText = if (existing.packSize > 0) Qty.format(existing.packSize) else ""
             stockText = Qty.format(maxOf(0.0, state?.stock(existing.id) ?: 0.0))
             refill = existing.refillNeeded
             notes = existing.notes
@@ -180,9 +182,10 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     val lowAtValue = lowAt.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
     val stockValue = if (stockText.isBlank()) 0.0 else stockText.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
     val stepValue = if (stepText.isBlank()) Pantry.defaultStep(QtyUnit.fromName(unit)) else Qty.parse(stepText)
+    val packValue = if (packText.isBlank()) 0.0 else Qty.parse(packText)
     val nameError = name.isBlank()
     val duplicate = name.isNotBlank() && state?.items?.any { it.id != id && it.name.trim().equals(name.trim(), ignoreCase = true) } == true
-    val invalid = nameError || lowAtValue == null || stockValue == null || stepValue == null || category.isBlank()
+    val invalid = nameError || lowAtValue == null || stockValue == null || stepValue == null || packValue == null || category.isBlank()
 
     fun leave(savedId: Long) {
         if (savedId == 0L && photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
@@ -205,6 +208,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             notes = notes.trim(),
             photoFile = photo,
             step = stepValue ?: 1.0,
+            packSize = packValue ?: 0.0,
         )
         val target = Qty.round(stockValue ?: 0.0)
         if (existing == null) {
@@ -312,6 +316,15 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
                 error = "An amount above 0",
             )
             Hint("For example 0.5 kg of rice per meal, or 1 packet of bread. Leave it empty for ${unitValue.label(Pantry.defaultStep(unitValue))}.")
+            NumberField(
+                value = packText,
+                onChange = { packText = it },
+                label = "Comes in packs of (optional)",
+                placeholder = "e.g. 10",
+                isError = showErrors && packValue == null,
+                error = "An amount above 0, or leave it empty",
+            )
+            Hint("Eggs: count them in pieces and set packs of 10. Then ＋ adds a whole pack and − takes one egg.")
 
             SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it }
             OutlinedTextField(
@@ -338,6 +351,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
 
     var loaded by rememberSaveable { mutableStateOf(false) }
     var qtyText by rememberSaveable { mutableStateOf("1") }
+    var inPacks by rememberSaveable { mutableStateOf(true) }
     var day by rememberSaveable { mutableStateOf(today.toEpochDay()) }
     var perUnit by rememberSaveable { mutableStateOf(false) }
     var priceText by rememberSaveable { mutableStateOf("") }
@@ -350,6 +364,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     LaunchedEffect(item?.id, existing?.id) {
         if (loaded || item == null || state == null) return@LaunchedEffect
         if (existing != null) {
+            inPacks = false
             qtyText = Qty.format(existing.quantity)
             day = existing.epochDay
             priceText = existing.priceMinor?.let { Money.minorToInput(it) } ?: ""
@@ -363,7 +378,12 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             val last = Pantry.lastPriced(entries)
             shop = last?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
             val unitPrice = last?.let { Pantry.unitPriceMinor(it) }
-            if (unitPrice != null) {
+            if (item.packSize > 0) {
+                inPacks = true
+                qtyText = "1"
+                // Pre-fill what one pack cost last time.
+                Pantry.priceFor(entries, item.packSize)?.let { priceText = Money.minorToInput(it) }
+            } else if (unitPrice != null) {
                 // For one unit, the total and the unit price are the same.
                 perUnit = item.unitValue() == QtyUnit.KG || item.unitValue() == QtyUnit.LITRE
                 priceText = Money.minorToInput(unitPrice)
@@ -372,12 +392,15 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
         loaded = true
     }
 
-    val qty = Qty.parse(qtyText)
+    val packMode = item != null && item.packSize > 0 && inPacks
+    val entered = Qty.parse(qtyText)
+    /** Always in the item's unit (pieces), whatever was typed. */
+    val qty = entered?.let { if (packMode) Qty.round(it * (item?.packSize ?: 1.0)) else it }
     val price = if (priceText.isBlank()) null else Money.parseToMinor(priceText)
     val priceError = priceText.isNotBlank() && price == null
     val total = when {
         price == null || qty == null -> null
-        perUnit -> Pantry.totalMinor(price, qty)
+        perUnit -> Pantry.totalMinor(price, entered ?: qty)
         else -> price
     }
 
@@ -426,28 +449,33 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (item.packSize > 0) {
+                ChipRow(listOf(true, false), inPacks, { if (it) "Packs of ${Qty.format(item.packSize)}" else unit.plural.replaceFirstChar { c -> c.uppercase() } }, { inPacks = it })
+            }
             NumberField(
                 value = qtyText,
                 onChange = { qtyText = it },
-                label = "How many ${unit.plural}",
+                label = if (packMode) "How many packs" else "How many ${unit.plural}",
                 isError = showErrors && qty == null,
                 error = "Enter an amount above 0",
             )
+            if (packMode && qty != null) Hint("= ${unit.label(qty)}")
             OutlinedButton(onClick = { pickDate(context, LocalDate.ofEpochDay(day), max = today) { day = it.toEpochDay() } }, modifier = Modifier.fillMaxWidth()) {
                 Text("Bought on ${LocalDate.ofEpochDay(day).format(dateFormat)}")
             }
 
             SectionLabel("Price (optional)")
-            ChipRow(listOf(false, true), perUnit, { if (it) "Price ${unit.priceLabel}" else "Total paid" }, { perUnit = it })
+            val perLabel = if (packMode) "per pack" else unit.priceLabel
+            ChipRow(listOf(false, true), perUnit, { if (it) "Price $perLabel" else "Total paid" }, { perUnit = it })
             NumberField(
                 value = priceText,
                 onChange = { priceText = it },
-                label = if (perUnit) "${currency} ${unit.priceLabel}" else "Total in $currency",
+                label = if (perUnit) "$currency $perLabel" else "Total in $currency",
                 isError = showErrors && priceError,
                 error = "Enter a price, up to 2 decimals",
             )
-            if (perUnit && total != null && qty != null) {
-                Hint("${unit.label(qty)} × ${Money.format(price ?: 0, currency)} = ${Money.format(total, currency)}")
+            if (perUnit && total != null && entered != null) {
+                Hint("${Qty.format(entered)} × ${Money.format(price ?: 0, currency)} = ${Money.format(total, currency)}")
             } else if (!perUnit && total != null && qty != null && qty != 1.0) {
                 Hint("${Money.format(Pantry.totalMinor(total, 1.0 / qty), currency)} ${unit.priceLabel}")
             }

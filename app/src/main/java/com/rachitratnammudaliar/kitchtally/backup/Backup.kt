@@ -35,7 +35,8 @@ object Backup {
                     .put("notes", i.notes)
                     .put("createdAt", i.createdAt)
                     .put("step", i.step)
-                    .put("hiddenFromList", i.hiddenFromList),
+                    .put("hiddenFromList", i.hiddenFromList)
+                    .put("packSize", i.packSize),
             )
         }
         val ids = items.map { it.id }.toSet()
@@ -97,6 +98,7 @@ object Backup {
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                 step = step,
                 hiddenFromList = o.optBoolean("hiddenFromList", false),
+                packSize = o.optDouble("packSize", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
             )
         }
         val refs = items.map { it.id }.toSet()

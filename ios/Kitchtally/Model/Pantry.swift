@@ -173,15 +173,32 @@ enum Pantry {
     /// What one tap of − or Shared takes: the item's step, never more than what's left.
     static func useAmount(_ step: Double, _ stock: Double) -> Double { max(0, Qty.round(min(max(step, 0.001), stock))) }
 
-    /// What one tap of ＋ adds: one of anything you count; for kilos and litres, the size you usually buy.
-    static func buyAmount(_ unit: QtyUnit, _ entries: [Entry]) -> Double {
+    /// What one tap of ＋ adds: a whole pack if it comes in packs; for kilos and litres, the size you usually buy; otherwise one.
+    static func buyAmount(_ unit: QtyUnit, _ entries: [Entry], packSize: Double = 0) -> Double {
+        if packSize > 0 { return packSize }
         guard unit == .KG || unit == .LITRE, let q = lastBought(entries)?.quantity, q > 0 else { return 1 }
         return q
     }
 
-    static func expectedPriceMinor(_ unit: QtyUnit, _ entries: [Entry]) -> Int64? {
+    static func expectedPriceMinor(_ unit: QtyUnit, _ entries: [Entry], packSize: Double = 0) -> Int64? {
+        priceFor(entries, buyAmount(unit, entries, packSize: packSize))
+    }
+
+    /// The price of [quantity] at the last unit price paid.
+    static func priceFor(_ entries: [Entry], _ quantity: Double) -> Int64? {
         guard let last = lastPriced(entries), let unitPrice = unitPriceMinor(last) else { return nil }
-        return totalMinor(unitPrice, buyAmount(unit, entries))
+        return totalMinor(unitPrice, quantity)
+    }
+
+    static func packLabel(_ unit: QtyUnit, _ packSize: Double) -> String {
+        packSize > 0 ? "1 pack = \(unit.label(packSize))" : ""
+    }
+
+    static func packsHint(_ stock: Double, _ packSize: Double) -> String {
+        guard packSize > 0, stock > 0 else { return "" }
+        let packs = stock / packSize
+        let text = packs >= 2 ? String(Int64(packs.rounded())) : Qty.format((packs * 10).rounded() / 10)
+        return "about \(text) pack\(text == "1" ? "" : "s")"
     }
 
     static func lastBought(_ entries: [Entry]) -> Entry? {

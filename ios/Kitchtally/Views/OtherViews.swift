@@ -25,7 +25,7 @@ struct ShoppingView: View {
             "Running low": list.filter { store.status($0, today) == .low },
             "Refill needed": list.filter { store.status($0, today) == .ok },
         ]
-        let estimate = list.reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id)) ?? 0) }
+        let estimate = list.reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id), packSize: $1.packSize) ?? 0) }
         let hidden = store.items.filter { $0.hiddenFromList && store.status($0, today) != .ok }
 
         NavigationStack(path: $path) {
@@ -96,11 +96,11 @@ struct ShoppingView: View {
     private func row(_ item: Item) -> some View {
         let entries = store.entries(item.id)
         let unit = item.unitValue
-        let expected = Pantry.expectedPriceMinor(unit, entries)
+        let expected = Pantry.expectedPriceMinor(unit, entries, packSize: item.packSize)
         let last = Pantry.lastPriced(entries)
         let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(entries)?.shop ?? "")
         let status = store.status(item, today)
-        let line = "Usually \(unit.label(Pantry.buyAmount(unit, entries)))"
+        let line = "Usually \(unit.label(Pantry.buyAmount(unit, entries, packSize: item.packSize)))"
             + (expected.map { " · \(Money.format($0, store.currency))" } ?? "")
             + (shop.isEmpty ? "" : " at \(shop)")
         return VStack(alignment: .leading, spacing: 8) {

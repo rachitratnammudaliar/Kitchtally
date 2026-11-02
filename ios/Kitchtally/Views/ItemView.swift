@@ -12,6 +12,7 @@ struct ItemView: View {
     @State private var openEvent: Event?
     @State private var receipt: String?
     @State private var undo: UndoState?
+    @State private var adjusting = false
 
 
     var body: some View {
@@ -44,7 +45,11 @@ struct ItemView: View {
                     }
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.name).font(.title2.weight(.semibold))
-                        StockPill(text: stockLabel(item, stock), status: status)
+                        StockPill(text: stockLabel(item, stock) + "  ±", status: status) { adjusting = true }
+                        if item.packSize > 0 {
+                            let hint = Pantry.packsHint(stock, item.packSize)
+                            Text(Pantry.packLabel(unit, item.packSize) + (hint.isEmpty ? "" : " · \(hint) left")).font(.caption).foregroundColor(.secondary)
+                        }
                         Text(detailLine(item, store, today)).font(.subheadline).foregroundColor(.secondary)
                     }
                 }
@@ -69,6 +74,7 @@ struct ItemView: View {
                         .buttonStyle(.borderedProminent)
                 }
                 .labelStyle(.titleAndIcon)
+                Button("Change amount…") { adjusting = true }
                 Button("Log a purchase with price and shop") { buying = PurchaseTarget(itemId: id, eventId: 0) }
                 Toggle(isOn: Binding(get: { item.refillNeeded }, set: { store.setRefillNeeded(id, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -89,7 +95,7 @@ struct ItemView: View {
                 InfoRow(label: "Category", value: "\(Categories.emojiFor(item.category)) \(item.category)")
                 InfoRow(label: "Lasts", value: item.lifeValue.label, note: item.lifeValue.description)
                 InfoRow(label: "Running low at", value: unit.label(item.lowAt))
-                InfoRow(label: "Each tap", value: "− uses \(unit.label(item.step))", note: "＋ adds \(unit.label(Pantry.buyAmount(unit, entries)))")
+                InfoRow(label: "Each tap", value: "− uses \(unit.label(item.step))", note: "＋ adds \(unit.label(Pantry.buyAmount(unit, entries, packSize: item.packSize)))")
                 if let rate = Pantry.dailyUse(entries, today) {
                     let perWeek = Qty.approx(rate * 7)
                     InfoRow(label: "You use", value: "about \(perWeek) \(perWeek == "1" ? unit.singular : unit.plural) a week")
@@ -170,6 +176,9 @@ struct ItemView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This removes the item, its photos and its whole history. It can't be undone.")
+        }
+        .sheet(isPresented: $adjusting) {
+            AdjustSheet(item: item) { message, action in showUndo($undo, message, action) }
         }
         .undoOverlay($undo)
     }

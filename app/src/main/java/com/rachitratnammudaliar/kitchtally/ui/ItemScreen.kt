@@ -80,6 +80,7 @@ fun ItemScreen(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
+    var adjusting by rememberSaveable { mutableStateOf(false) }
     var openEvent by remember { mutableStateOf<Event?>(null) }
     var showReceipt by remember { mutableStateOf("") }
     val item = state?.item(id)
@@ -129,7 +130,8 @@ fun ItemScreen(
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(item.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    StockPill(stockLabel(item, stock), status)
+                    StockPill(stockLabel(item, stock) + "  ±", status) { adjusting = true }
+                    if (item.packSize > 0) Hint(Pantry.packLabel(unit, item.packSize) + Pantry.packsHint(stock, item.packSize).let { if (it.isEmpty()) "" else " · $it left" })
                     Text(detailLine(item, state, today), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -146,7 +148,10 @@ fun ItemScreen(
                     vm.quickBuy(state, item) { buy -> scope.undoSnackbar(snackbar, "Added ${unit.label(buy.amount)}") { vm.undoBuy(buy) } }
                 }, modifier = Modifier.weight(1f)) { Text("＋ Bought") }
             }
-            FilledTonalButton(onClick = { onBuy(0) }, modifier = Modifier.fillMaxWidth()) { Text("Log a purchase with price and shop") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = { adjusting = true }, modifier = Modifier.weight(1f)) { Text("Change amount…") }
+                FilledTonalButton(onClick = { onBuy(0) }, modifier = Modifier.weight(1f)) { Text("Price & shop…") }
+            }
             SwitchRow(
                 title = "Refill needed",
                 subtitle = if (item.refillNeeded) "On your shopping list" else "Put it on the shopping list now",
@@ -170,7 +175,7 @@ fun ItemScreen(
                     HorizontalDivider()
                     InfoRow("Running low at", unit.label(item.lowAt))
                     HorizontalDivider()
-                    InfoRow("Each tap", "− uses ${unit.label(item.step)}", "＋ adds ${unit.label(Pantry.buyAmount(unit, entries))}")
+                    InfoRow("Each tap", "− uses ${unit.label(item.step)}", "＋ adds ${unit.label(Pantry.buyAmount(unit, entries, item.packSize))}")
                     Pantry.dailyUse(entries, today)?.let { rate ->
                         HorizontalDivider()
                         val perWeek = Qty.approx(rate * 7)
@@ -212,6 +217,13 @@ fun ItemScreen(
                 if (events.size > 100) Hint("Showing the latest 100 of ${events.size}.")
             }
             Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    if (adjusting && item != null && state != null) {
+        AdjustDialog(item, state.stock(item.id), onDismiss = { adjusting = false }) { action, amount ->
+            adjusting = false
+            vm.adjust(state, item, action, amount) { message, undo -> scope.undoSnackbar(snackbar, message, undo) }
         }
     }
 

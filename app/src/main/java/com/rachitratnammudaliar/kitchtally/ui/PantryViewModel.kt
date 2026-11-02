@@ -19,6 +19,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
+import com.rachitratnammudaliar.kitchtally.domain.Qty
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -139,8 +140,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun quickBuy(state: PantryState, item: Item, onLogged: (QuickBuy) -> Unit) {
         val entries = state.entries(item.id)
-        val amount = Pantry.buyAmount(item.unitValue(), entries)
-        val price = Pantry.expectedPriceMinor(item.unitValue(), entries)
+        val amount = Pantry.buyAmount(item.unitValue(), entries, item.packSize)
+        val price = Pantry.expectedPriceMinor(item.unitValue(), entries, item.packSize)
         val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
         viewModelScope.launch {
             tapLock.withLock {
@@ -149,6 +150,47 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 dao.clearRefill(item.id)
                 onLogged(QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList))
+            }
+        }
+    }
+
+    enum class Adjust { USED, SHARED, BOUGHT, SET }
+
+    /**
+     * The adjust box: use, share or buy any amount, or set the stock to an exact amount.
+     * Uses never go below zero. [onDone] gets an Undo action and a message, or nothing if nothing changed.
+     */
+    fun adjust(state: PantryState, item: Item, action: Adjust, amount: Double, onDone: (message: String, undo: () -> Unit) -> Unit) {
+        val unit = item.unitValue()
+        val entries = state.entries(item.id)
+        viewModelScope.launch {
+            tapLock.withLock {
+                val stock = dao.stockOf(item.id)
+                val today = LocalDate.now().toEpochDay()
+                when (action) {
+                    Adjust.USED, Adjust.SHARED -> {
+                        val q = Qty.round(minOf(amount, stock))
+                        if (q <= 0) return@withLock
+                        val type = if (action == Adjust.SHARED) EventType.SHARED else EventType.USED
+                        val id = dao.insert(Event(itemId = item.id, type = type.name, epochDay = today, quantity = q))
+                        onDone("${if (action == Adjust.SHARED) "Shared" else "Used"} ${unit.label(q)}") { undo(id) }
+                    }
+                    Adjust.BOUGHT -> {
+                        if (amount <= 0) return@withLock
+                        val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
+                        val id = dao.insert(
+                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.priceFor(entries, amount), shop = shop),
+                        )
+                        dao.clearRefill(item.id)
+                        onDone("Added ${unit.label(amount)}") { undoBuy(QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList)) }
+                    }
+                    Adjust.SET -> {
+                        val diff = Qty.round(amount - stock)
+                        if (diff == 0.0) return@withLock
+                        val id = dao.insert(Event(itemId = item.id, type = EventType.ADJUST.name, epochDay = today, quantity = diff, note = "Counted"))
+                        onDone("Set to ${unit.label(amount)}") { undo(id) }
+                    }
+                }
             }
         }
     }
@@ -280,7 +322,12 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 ev(b, 14, 2.0, 138, "Norfa"), ev(u, 10, 0.5), ev(u, 6, 0.5), ev(u, 2, 0.5))
             add("Spaghetti", "Groceries", QtyUnit.PACKET, Life.LONG,
                 ev(b, 16, 3.0, 237, "Rimi"), ev(u, 12), ev(s, 5))
-            add("Eggs", "Dairy & eggs", QtyUnit.BOX, Life.MEDIUM, ev(b, 5, 1.0, 289, "IKI"))
+            db.withTransaction {
+                dao.insertItemWithEvents(
+                    Item(name = "Eggs", category = "Dairy & eggs", unit = QtyUnit.PIECE.name, life = Life.MEDIUM.name, lowAt = 3.0, packSize = 10.0),
+                    listOf(ev(b, 5, 10.0, 289, "IKI"), ev(u, 3, 2.0), ev(s, 1, 2.0)),
+                )
+            }
             add("Toothpaste", "Toiletries", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
             add("Dish soap", "Cleaning", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
             dao.insert(ShoppingNote(text = "Birthday candles"))

@@ -16,6 +16,8 @@ struct Item: Identifiable, Equatable {
     var step: Double = 1
     /// Kept off the shopping list until it's bought again.
     var hiddenFromList: Bool = false
+    /// Units in one pack, e.g. 10 eggs; 0 if not bought in packs.
+    var packSize: Double = 0
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var lifeValue: Life { Life.from(life) }
@@ -69,7 +71,7 @@ enum Backup {
             var o: [String: Any] = [
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
-                "step": i.step, "hiddenFromList": i.hiddenFromList,
+                "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -121,7 +123,8 @@ enum Backup {
                 notes: String(string(o, "notes").prefix(500)),
                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
                 step: min(step, 10_000),
-                hiddenFromList: (o["hiddenFromList"] as? Bool) ?? false
+                hiddenFromList: (o["hiddenFromList"] as? Bool) ?? false,
+                packSize: max(0, min(number(o, "packSize")?.doubleValue ?? 0, 10_000))
             ))
         }
         let refs = Set(items.map(\.id))
@@ -360,12 +363,42 @@ final class Store: ObservableObject {
     /// The quick ＋: one more (or the usual pack size for kilos and litres), today, at last time's shop and price.
     func quickBuy(_ item: Item) -> QuickBuy {
         let list = entries(item.id)
-        let amount = Pantry.buyAmount(item.unitValue, list)
-        let price = Pantry.expectedPriceMinor(item.unitValue, list)
+        let amount = Pantry.buyAmount(item.unitValue, list, packSize: item.packSize)
+        let price = Pantry.expectedPriceMinor(item.unitValue, list, packSize: item.packSize)
         let last = Pantry.lastPriced(list)
         let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(list)?.shop ?? "")
         let id = log(item.id, .BOUGHT, quantity: amount, priceMinor: price, shop: shop)
         return QuickBuy(eventId: id, amount: amount, itemId: item.id, wasRefill: item.refillNeeded, wasHidden: item.hiddenFromList)
+    }
+
+    enum Adjust { case used, shared, bought, set }
+
+    /// The adjust box. Returns a message and an Undo action, or nil if nothing changed.
+    func adjust(_ item: Item, _ action: Adjust, _ amount: Double) -> (String, () -> Void)? {
+        let unit = item.unitValue
+        let current = stock(item.id)
+        switch action {
+        case .used, .shared:
+            let q = Qty.round(min(amount, current))
+            guard q > 0 else { return nil }
+            let id = log(item.id, action == .shared ? .SHARED : .USED, quantity: q)
+            return ("\(action == .shared ? "Shared" : "Used") \(unit.label(q))", { self.deleteEvent(id) })
+        case .bought:
+            guard amount > 0 else { return nil }
+            let list = entries(item.id)
+            let last = Pantry.lastPriced(list)
+            let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(list)?.shop ?? "")
+            let id = log(item.id, .BOUGHT, quantity: amount, priceMinor: Pantry.priceFor(list, amount), shop: shop)
+            let buy = QuickBuy(eventId: id, amount: amount, itemId: item.id, wasRefill: item.refillNeeded, wasHidden: item.hiddenFromList)
+            return ("Added \(unit.label(amount))", { self.undoBuy(buy) })
+        case .set:
+            let diff = Qty.round(amount - current)
+            guard diff != 0 else { return nil }
+            appendEvent(Event(itemId: item.id, type: EventType.ADJUST.rawValue, epochDay: Day.today().epochDay, quantity: diff, note: "Counted"))
+            persist()
+            let id = nextEventId - 1
+            return ("Set to \(unit.label(amount))", { self.deleteEvent(id) })
+        }
     }
 
     func undoBuy(_ buy: QuickBuy) {

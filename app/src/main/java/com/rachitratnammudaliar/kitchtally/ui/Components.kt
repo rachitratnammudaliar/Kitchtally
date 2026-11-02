@@ -116,7 +116,7 @@ fun ItemImage(name: String, photoFile: String, size: Dp = 48.dp, category: Strin
 
 /** A rounded label showing how much is left, coloured by status. */
 @Composable
-fun StockPill(text: String, status: StockStatus) {
+fun StockPill(text: String, status: StockStatus, onClick: (() -> Unit)? = null) {
     val dark = isSystemInDarkTheme()
     val (bg, fg) = when (status) {
         StockStatus.OUT -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
@@ -128,7 +128,9 @@ fun StockPill(text: String, status: StockStatus) {
         style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.SemiBold,
         color = fg,
-        modifier = Modifier.clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 10.dp, vertical = 3.dp),
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(bg)
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            .padding(horizontal = 10.dp, vertical = 3.dp),
     )
 }
 

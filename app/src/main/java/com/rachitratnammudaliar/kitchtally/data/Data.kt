@@ -44,6 +44,8 @@ data class Item(
     val step: Double = 1.0,
     /** Kept off the shopping list until it's bought again. */
     val hiddenFromList: Boolean = false,
+    /** How many units one pack holds, e.g. 10 eggs; 0 if it isn't bought in packs. */
+    val packSize: Double = 0.0,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -160,12 +162,13 @@ interface PantryDao {
 
 /**
  * Version 1 -> 2 (app 1.0.0 -> 1.1.0): per-item "uses per tap" amount, "hide until bought",
- * and free-text shopping notes. Kilos and litres start at half a unit per tap.
+ * pack size, and free-text shopping notes. Kilos and litres start at half a unit per tap.
  */
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE items ADD COLUMN step REAL NOT NULL DEFAULT 1")
         db.execSQL("ALTER TABLE items ADD COLUMN hiddenFromList INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN packSize REAL NOT NULL DEFAULT 0")
         db.execSQL("UPDATE items SET step = 0.5 WHERE unit IN ('KG', 'LITRE')")
         db.execSQL("CREATE TABLE IF NOT EXISTS shopping_notes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, text TEXT NOT NULL, createdAt INTEGER NOT NULL)")
     }

@@ -81,6 +81,7 @@ struct ItemImage: View {
 struct StockPill: View {
     let text: String
     let status: StockStatus
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
         let colors: (Color, Color) = {
@@ -96,6 +97,9 @@ struct StockPill: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
             .background(Capsule().fill(colors.0))
+            .contentShape(Capsule())
+            .onTapGesture { onTap?() }
+            .accessibilityAddTraits(onTap == nil ? [] : .isButton)
     }
 }
 

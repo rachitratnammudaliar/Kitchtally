@@ -11,6 +11,7 @@ struct EditItemView: View {
     @State private var life: Life
     @State private var lowAt: String
     @State private var stepText: String
+    @State private var packText: String
     @State private var stockText: String
     @State private var refill: Bool
     @State private var notes: String
@@ -26,6 +27,7 @@ struct EditItemView: View {
         _life = State(initialValue: existing?.lifeValue ?? .MEDIUM)
         _lowAt = State(initialValue: Qty.format(existing?.lowAt ?? 1))
         _stepText = State(initialValue: existing.map { Qty.format($0.step) } ?? "")
+        _packText = State(initialValue: (existing?.packSize ?? 0) > 0 ? Qty.format(existing!.packSize) : "")
         _stockText = State(initialValue: "")
         _refill = State(initialValue: existing?.refillNeeded ?? false)
         _notes = State(initialValue: existing?.notes ?? "")
@@ -45,7 +47,8 @@ struct EditItemView: View {
         let n = name.trimmingCharacters(in: .whitespaces).lowercased()
         return !n.isEmpty && store.items.contains { $0.id != existing?.id && $0.name.trimmingCharacters(in: .whitespaces).lowercased() == n }
     }
-    private var invalid: Bool { nameError || number(lowAt) == nil || number(stockText) == nil || stepValue == nil || category.isEmpty }
+    private var packValue: Double? { packText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : Qty.parse(packText) }
+    private var invalid: Bool { nameError || number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil || category.isEmpty }
 
     private func save() {
         if invalid {
@@ -62,6 +65,7 @@ struct EditItemView: View {
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.photoFile = photo
         item.step = stepValue ?? 1
+        item.packSize = packValue ?? 0
         let target = number(stockText) ?? 0
         if let e = existing {
             // An empty "amount now" keeps the current amount.
@@ -141,12 +145,18 @@ struct EditItemView: View {
                         TextField(Qty.format(Pantry.defaultStep(unit)), text: $stepText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                         Text(unit.plural).foregroundColor(.secondary)
                     }
-                    if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil) {
+                    HStack {
+                        Text("Comes in packs of")
+                        Spacer()
+                        TextField("optional", text: $packText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
+                        Text(unit.plural).foregroundColor(.secondary)
+                    }
+                    if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil) {
                         Text("Use a number, 0 or more").font(.caption).foregroundColor(.red)
                     }
                     Toggle("Refill needed", isOn: $refill)
                 } footer: {
-                    Text("It goes on the shopping list at or below \"running low at\". \"Each − uses\" is, for example, 0.5 kg of rice per meal." + (existing == nil ? "" : " Leave \"amount now\" empty to keep the current amount."))
+                    Text("It goes on the shopping list at or below \"running low at\". \"Each − uses\" is, for example, 0.5 kg of rice per meal. For eggs, count in pieces with packs of 10: ＋ adds a pack, − takes one egg." + (existing == nil ? "" : " Leave \"amount now\" empty to keep the current amount."))
                 }
 
                 Section {
@@ -176,6 +186,7 @@ struct PurchaseView: View {
 
     @State private var loaded = false
     @State private var qtyText = "1"
+    @State private var inPacks = true
     @State private var date = Date()
     @State private var perUnit = false
     @State private var priceText = ""
@@ -186,18 +197,23 @@ struct PurchaseView: View {
     @State private var showErrors = false
 
     private var existing: Event? { target.eventId == 0 ? nil : store.events.first { $0.id == target.eventId } }
-    private var qty: Double? { Qty.parse(qtyText) }
+    private var packSize: Double { store.item(target.itemId)?.packSize ?? 0 }
+    private var packMode: Bool { packSize > 0 && inPacks }
+    private var entered: Double? { Qty.parse(qtyText) }
+    /// Always in the item's unit, whatever was typed.
+    private var qty: Double? { entered.map { packMode ? Qty.round($0 * packSize) : $0 } }
     private var price: Int64? { priceText.isEmpty ? nil : Money.parseToMinor(priceText) }
     private var priceError: Bool { !priceText.isEmpty && price == nil }
     private var total: Int64? {
         guard let p = price, let q = qty else { return nil }
-        return perUnit ? Pantry.totalMinor(p, q) : p
+        return perUnit ? Pantry.totalMinor(p, entered ?? q) : p
     }
 
     private func load() {
         guard !loaded, let item = store.item(target.itemId) else { return }
         loaded = true
         if let e = existing {
+            inPacks = false
             qtyText = Qty.format(e.quantity)
             date = e.date.localDate
             priceText = e.priceMinor.map { Money.minorToInput($0) } ?? ""
@@ -209,7 +225,10 @@ struct PurchaseView: View {
             let entries = store.entries(target.itemId)
             let last = Pantry.lastPriced(entries)
             shop = (last?.shop.isEmpty == false ? last?.shop : Pantry.lastBought(entries)?.shop) ?? ""
-            if let last = last, let unitPrice = Pantry.unitPriceMinor(last) {
+            if item.packSize > 0 {
+                inPacks = true
+                if let p = Pantry.priceFor(entries, item.packSize) { priceText = Money.minorToInput(p) }
+            } else if let last = last, let unitPrice = Pantry.unitPriceMinor(last) {
                 perUnit = item.unitValue == .KG || item.unitValue == .LITRE
                 priceText = Money.minorToInput(unitPrice)
             }
@@ -247,29 +266,37 @@ struct PurchaseView: View {
         NavigationStack {
             Form {
                 Section {
+                    if packSize > 0 {
+                        Picker("Count in", selection: $inPacks) {
+                            Text("Packs of \(Qty.format(packSize))").tag(true)
+                            Text(unit.plural.capitalized).tag(false)
+                        }
+                        .pickerStyle(.segmented)
+                    }
                     HStack {
-                        Text("How many \(unit.plural)")
+                        Text(packMode ? "How many packs" : "How many \(unit.plural)")
                         Spacer()
                         TextField("1", text: $qtyText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                     }
                     if showErrors && qty == nil { Text("Enter an amount above 0").font(.caption).foregroundColor(.red) }
+                    if packMode, let q = qty { Text("= \(unit.label(q))").font(.caption).foregroundColor(.secondary) }
                     DatePicker("Bought on", selection: $date, in: ...Date(), displayedComponents: .date)
                 }
 
                 Section("Price (optional)") {
                     Picker("Price is", selection: $perUnit) {
                         Text("Total paid").tag(false)
-                        Text("Price \(unit.priceLabel)").tag(true)
+                        Text("Price \(packMode ? "per pack" : unit.priceLabel)").tag(true)
                     }
                     .pickerStyle(.segmented)
                     HStack {
-                        Text(perUnit ? "\(store.currency) \(unit.priceLabel)" : "Total in \(store.currency)")
+                        Text(perUnit ? "\(store.currency) \(packMode ? "per pack" : unit.priceLabel)" : "Total in \(store.currency)")
                         Spacer()
                         TextField("0.00", text: $priceText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 110)
                     }
                     if showErrors && priceError { Text("Enter a price, up to 2 decimals").font(.caption).foregroundColor(.red) }
-                    if perUnit, let t = total, let q = qty, let p = price {
-                        Text("\(unit.label(q)) × \(Money.format(p, store.currency)) = \(Money.format(t, store.currency))").font(.caption).foregroundColor(.secondary)
+                    if perUnit, let t = total, let e = entered, let p = price {
+                        Text("\(Qty.format(e)) × \(Money.format(p, store.currency)) = \(Money.format(t, store.currency))").font(.caption).foregroundColor(.secondary)
                     } else if !perUnit, let t = total, let q = qty, q != 1 {
                         Text("\(Money.format(Pantry.totalMinor(t, 1 / q), store.currency)) \(unit.priceLabel)").font(.caption).foregroundColor(.secondary)
                     }

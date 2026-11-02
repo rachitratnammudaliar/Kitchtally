@@ -46,6 +46,8 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - Items with a photo (camera or gallery), category, unit (pieces, packets, bottles, boxes, bags, kg, litres) and how long they last: short (bread, milk), medium (onions, eggs) or long (rice, atta, pasta)
 - **＋** adds one more (for kilos and litres, the bag size you usually buy), logged as refilled today at last time's shop and price
 - **−** uses the item's amount per tap, for example 1 packet of bread or 0.5 kg of rice. **Shared** does the same for cooking with friends; it counts quantity only, never money
+- **Packs:** count eggs in pieces with "packs of 10"; ＋ adds a whole pack, − takes one egg
+- **Any amount:** tap the amount to use, share or buy −2, +2 or any number, or set what's left after counting
 - Stock never goes below zero, and search finds any item
 - Every quick action can be undone
 - Stock pills: green when there's enough, amber when running low, red when out
