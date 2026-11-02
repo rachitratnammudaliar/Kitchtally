@@ -10,6 +10,9 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -121,7 +124,9 @@ fun detailLine(item: Item, state: PantryState, today: LocalDate): String {
 
 /** On the list when marked, out or running low, unless hidden until it's bought again. */
 fun onShoppingList(item: Item, state: PantryState, today: LocalDate): Boolean =
-    item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.lowAt, today) != StockStatus.OK)
+    !item.unsure && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.lowAt, today) != StockStatus.OK))
+
+const val UNSURE_GROUP = "🤔  Not sure to buy again"
 
 /** Preset categories in order, then the user's own alphabetically. */
 fun orderedCategories(used: List<String>): List<String> {
@@ -316,10 +321,11 @@ private fun PantryList(
         (active == null || it.category.equals(active, ignoreCase = true)) &&
             (query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.notes.contains(query, ignoreCase = true))
     }
+    // Items you're not sure about get their own group at the bottom.
     val groups = categories.mapNotNull { c ->
-        val list = shown.filter { it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
+        val list = shown.filter { !it.unsure && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
-    }
+    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it })
     val week = Pantry.week(Pantry.weekStart(today), state.entriesByItem) { id -> state.item(id)?.category ?: "" }
     val toBuy = state.items.count { onShoppingList(it, state, today) }
 
@@ -378,7 +384,7 @@ private fun PantryList(
         groups.forEach { (category, items) ->
             item(key = "cat-$category") {
                 Text(
-                    "${Categories.emojiFor(category)}  $category · ${items.size}",
+                    if (category == UNSURE_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -570,14 +576,32 @@ private fun ShoppingList(
                                 }
                             }
                             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = {
-                                    if (row.refillNeeded && Pantry.status(entries, row.lowAt, today) == StockStatus.OK) {
-                                        vm.setRefillNeeded(row, false)
-                                    } else {
-                                        vm.setHidden(row, true)
-                                        scope.undoSnackbar(snackbar, "${row.name} hidden until you buy it again") { vm.setHidden(row, false) }
+                                var menu by remember { mutableStateOf(false) }
+                                Box {
+                                    TextButton(onClick = { menu = true }) { Text("Not now") }
+                                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("Hide until I buy it") },
+                                            onClick = {
+                                                menu = false
+                                                if (row.refillNeeded && Pantry.status(entries, row.lowAt, today) == StockStatus.OK) {
+                                                    vm.setRefillNeeded(row, false)
+                                                } else {
+                                                    vm.setHidden(row, true)
+                                                    scope.undoSnackbar(snackbar, "${row.name} hidden until you buy it again") { vm.setHidden(row, false) }
+                                                }
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Not sure to buy again") },
+                                            onClick = {
+                                                menu = false
+                                                vm.setUnsure(row, true)
+                                                scope.undoSnackbar(snackbar, "${row.name} moved to \"Not sure to buy again\"") { vm.setUnsure(row, false) }
+                                            },
+                                        )
                                     }
-                                }) { Text("Not now") }
+                                }
                                 TextButton(onClick = { onBuy(row.id) }) { Text("Price & shop") }
                                 FilledTonalButton(onClick = {
                                     vm.quickBuy(state, row) { buy ->

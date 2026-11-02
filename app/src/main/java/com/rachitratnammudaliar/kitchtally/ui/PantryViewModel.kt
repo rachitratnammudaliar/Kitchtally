@@ -108,6 +108,10 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { dao.setRefill(item.id, needed) }
     }
 
+    fun setUnsure(item: Item, unsure: Boolean) {
+        viewModelScope.launch { dao.setUnsure(item.id, unsure) }
+    }
+
     /** Hides an item from the shopping list until it's bought again, or shows it again. */
     fun setHidden(item: Item, hidden: Boolean) {
         viewModelScope.launch {
@@ -214,7 +218,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val match = state.items.firstOrNull { it.name.equals(clean, ignoreCase = true) }
             if (match != null) {
-                dao.update((dao.item(match.id) ?: match).copy(refillNeeded = true, hiddenFromList = false))
+                dao.update((dao.item(match.id) ?: match).copy(refillNeeded = true, hiddenFromList = false, unsure = false))
             } else {
                 dao.insert(ShoppingNote(text = clean))
             }
@@ -330,6 +334,12 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             }
             add("Toothpaste", "Toiletries", QtyUnit.PIECE, Life.LONG, ev(b, 30, 1.0, 199, "Pepco"), refill = true)
             add("Dish soap", "Cleaning", QtyUnit.BOTTLE, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1))
+            db.withTransaction {
+                dao.insertItemWithEvents(
+                    Item(name = "Instant noodles", category = "Snacks", unit = QtyUnit.PACKET.name, life = Life.LONG.name, unsure = true),
+                    listOf(ev(b, 20, 5.0, 295, "Maxima"), ev(u, 15, 2.0), ev(u, 8, 2.0), ev(u, 3)),
+                )
+            }
             dao.insert(ShoppingNote(text = "Birthday candles"))
             dao.insert(ShoppingNote(text = "Aluminium foil"))
         }

@@ -18,6 +18,8 @@ struct Item: Identifiable, Equatable {
     var hiddenFromList: Bool = false
     /// Units in one pack, e.g. 10 eggs; 0 if not bought in packs.
     var packSize: Double = 0
+    /// Not sure whether to buy it again: never on the shopping list until switched off.
+    var unsure: Bool = false
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var lifeValue: Life { Life.from(life) }
@@ -71,7 +73,7 @@ enum Backup {
             var o: [String: Any] = [
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
-                "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize,
+                "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -85,7 +87,7 @@ enum Backup {
             return o
         }
         let notesJson: [[String: Any]] = notes.map { ["text": $0.text, "createdAt": $0.createdAt] }
-        let root: [String: Any] = ["format": format, "version": 2, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
+        let root: [String: Any] = ["format": format, "version": 3, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -124,7 +126,8 @@ enum Backup {
                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
                 step: min(step, 10_000),
                 hiddenFromList: (o["hiddenFromList"] as? Bool) ?? false,
-                packSize: max(0, min(number(o, "packSize")?.doubleValue ?? 0, 10_000))
+                packSize: max(0, min(number(o, "packSize")?.doubleValue ?? 0, 10_000)),
+                unsure: (o["unsure"] as? Bool) ?? false
             ))
         }
         let refs = Set(items.map(\.id))
@@ -253,7 +256,7 @@ final class Store: ObservableObject {
     func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), lowAt: item.lowAt, today) }
     /// On the list when marked, out or running low, unless hidden until it's bought again.
     func onShoppingList(_ item: Item, _ today: Day) -> Bool {
-        item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok)
+        !item.unsure && (item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok))
     }
 
     // MARK: Saving
@@ -328,10 +331,26 @@ final class Store: ObservableObject {
         persist()
     }
 
+    /// Marking an item as needed also means you're sure about buying it again.
     func setRefillNeeded(_ id: Int64, _ needed: Bool) {
         items = items.map { i in
             var copy = i
-            if i.id == id { copy.refillNeeded = needed }
+            if i.id == id {
+                copy.refillNeeded = needed
+                if needed { copy.unsure = false }
+            }
+            return copy
+        }
+        persist()
+    }
+
+    func setUnsure(_ id: Int64, _ unsure: Bool) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id {
+                copy.unsure = unsure
+                if unsure { copy.refillNeeded = false }
+            }
             return copy
         }
         persist()
@@ -437,6 +456,7 @@ final class Store: ObservableObject {
                 if i.id == match.id {
                     copy.refillNeeded = true
                     copy.hiddenFromList = false
+                    copy.unsure = false
                 }
                 return copy
             }

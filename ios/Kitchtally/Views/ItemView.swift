@@ -82,6 +82,13 @@ struct ItemView: View {
                         Text(item.refillNeeded ? "On your shopping list" : "Put it on the shopping list now").font(.caption).foregroundColor(.secondary)
                     }
                 }
+                Toggle(isOn: Binding(get: { item.unsure }, set: { store.setUnsure(id, $0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Not sure to buy again")
+                        Text(item.unsure ? "Kept off the shopping list, even when it runs out" : "Keep it off the shopping list until you decide")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
                 if item.hiddenFromList {
                     HStack {
                         Text("Hidden from the shopping list until you buy it again.").font(.caption).foregroundColor(.secondary)

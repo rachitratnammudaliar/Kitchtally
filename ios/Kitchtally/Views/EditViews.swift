@@ -14,6 +14,7 @@ struct EditItemView: View {
     @State private var packText: String
     @State private var stockText: String
     @State private var refill: Bool
+    @State private var unsure: Bool
     @State private var notes: String
     @State private var photo: String
     @State private var showErrors = false
@@ -30,6 +31,7 @@ struct EditItemView: View {
         _packText = State(initialValue: (existing?.packSize ?? 0) > 0 ? Qty.format(existing!.packSize) : "")
         _stockText = State(initialValue: "")
         _refill = State(initialValue: existing?.refillNeeded ?? false)
+        _unsure = State(initialValue: existing?.unsure ?? false)
         _notes = State(initialValue: existing?.notes ?? "")
         _photo = State(initialValue: existing?.photoFile ?? "")
         originalPhoto = existing?.photoFile ?? ""
@@ -61,7 +63,8 @@ struct EditItemView: View {
         item.unit = unit.rawValue
         item.life = life.rawValue
         item.lowAt = number(lowAt) ?? 1
-        item.refillNeeded = refill
+        item.refillNeeded = refill && !unsure
+        item.unsure = unsure
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.photoFile = photo
         item.step = stepValue ?? 1
@@ -154,7 +157,8 @@ struct EditItemView: View {
                     if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil) {
                         Text("Use a number, 0 or more").font(.caption).foregroundColor(.red)
                     }
-                    Toggle("Refill needed", isOn: $refill)
+                    Toggle("Refill needed", isOn: Binding(get: { refill }, set: { refill = $0; if $0 { unsure = false } }))
+                    Toggle("Not sure to buy again", isOn: Binding(get: { unsure }, set: { unsure = $0; if $0 { refill = false } }))
                 } footer: {
                     Text("It goes on the shopping list at or below \"running low at\". \"Each − uses\" is, for example, 0.5 kg of rice per meal. For eggs, count in pieces with packs of 10: ＋ adds a pack, − takes one egg." + (existing == nil ? "" : " Leave \"amount now\" empty to keep the current amount."))
                 }

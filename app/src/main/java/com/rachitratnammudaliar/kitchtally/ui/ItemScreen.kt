@@ -158,6 +158,12 @@ fun ItemScreen(
                 checked = item.refillNeeded,
                 onChange = { vm.setRefillNeeded(item, it) },
             )
+            SwitchRow(
+                title = "Not sure to buy again",
+                subtitle = if (item.unsure) "Kept off the shopping list, even when it runs out" else "Keep it off the shopping list until you decide",
+                checked = item.unsure,
+                onChange = { vm.setUnsure(item, it) },
+            )
             if (item.hiddenFromList) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Hint("Hidden from the shopping list until you buy it again.")

@@ -46,13 +46,21 @@ struct PantryView: View {
                         Text("Nothing matches \"\(search)\"").foregroundColor(.secondary)
                     }
                     ForEach(categories.filter { filter.isEmpty || $0 == filter }, id: \.self) { category in
-                        let rows = shown.filter { $0.category.lowercased() == category.lowercased() }
+                        let rows = shown.filter { !$0.unsure && $0.category.lowercased() == category.lowercased() }
                             .sorted { $0.name.lowercased() < $1.name.lowercased() }
                         if !rows.isEmpty {
                             Section(header: Text("\(Categories.emojiFor(category))  \(category) · \(rows.count)")) {
                                 ForEach(rows) { item in
                                     ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
                                 }
+                            }
+                        }
+                    }
+                    let unsure = shown.filter { $0.unsure && (filter.isEmpty || $0.category == filter) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+                    if !unsure.isEmpty {
+                        Section(header: Text("🤔  Not sure to buy again · \(unsure.count)")) {
+                            ForEach(unsure) { item in
+                                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
                             }
                         }
                     }

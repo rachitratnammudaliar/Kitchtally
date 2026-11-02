@@ -117,12 +117,18 @@ struct ShoppingView: View {
             .onTapGesture { path.append(item.id) }
             HStack {
                 Spacer()
-                Button("Not now") {
-                    if item.refillNeeded && status == .ok {
-                        store.setRefillNeeded(item.id, false)
-                    } else {
-                        store.setHidden(item.id, true)
-                        showUndo($undo, "\(item.name) hidden until you buy it again") { store.setHidden(item.id, false) }
+                Menu("Not now") {
+                    Button("Hide until I buy it") {
+                        if item.refillNeeded && status == .ok {
+                            store.setRefillNeeded(item.id, false)
+                        } else {
+                            store.setHidden(item.id, true)
+                            showUndo($undo, "\(item.name) hidden until you buy it again") { store.setHidden(item.id, false) }
+                        }
+                    }
+                    Button("Not sure to buy again") {
+                        store.setUnsure(item.id, true)
+                        showUndo($undo, "\(item.name) moved to \"Not sure to buy again\"") { store.setUnsure(item.id, false) }
                     }
                 }
                 .buttonStyle(.borderless)

@@ -46,6 +46,9 @@ data class Item(
     val hiddenFromList: Boolean = false,
     /** How many units one pack holds, e.g. 10 eggs; 0 if it isn't bought in packs. */
     val packSize: Double = 0.0,
+    // Added in database version 3 (app 1.2.0).
+    /** Not sure whether to buy it again: never put on the shopping list until switched off. */
+    val unsure: Boolean = false,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -112,8 +115,12 @@ interface PantryDao {
     @Query("SELECT COALESCE(SUM(CASE WHEN type IN ('BOUGHT', 'ADJUST') THEN quantity ELSE -quantity END), 0) FROM events WHERE itemId = :id")
     suspend fun stockOf(id: Long): Double
 
-    @Query("UPDATE items SET refillNeeded = :needed WHERE id = :id")
+    /** Marking an item as needed also means you're sure about buying it again. */
+    @Query("UPDATE items SET refillNeeded = :needed, unsure = CASE WHEN :needed THEN 0 ELSE unsure END WHERE id = :id")
     suspend fun setRefill(id: Long, needed: Boolean)
+
+    @Query("UPDATE items SET unsure = :unsure, refillNeeded = CASE WHEN :unsure THEN 0 ELSE refillNeeded END WHERE id = :id")
+    suspend fun setUnsure(id: Long, unsure: Boolean)
 
     @Query("SELECT * FROM items")
     suspend fun items(): List<Item>
@@ -174,7 +181,14 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 2, exportSchema = false)
+/** Version 2 -> 3 (app 1.1.0 -> 1.2.0): "not sure to buy again". */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE items ADD COLUMN unsure INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 3, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -187,7 +201,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { instance = it }
             }
     }

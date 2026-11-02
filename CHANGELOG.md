@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- **Not sure to buy again:** one tap on an item (or Not now → Not sure to buy again on the shopping list) keeps it off the shopping list, even when it runs out. These items have their own group at the bottom of the pantry until you switch it off
+
 ## 1.1.0
 
 **New**

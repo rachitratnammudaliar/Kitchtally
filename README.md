@@ -63,6 +63,7 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - Type anything at the top, like candles or foil, and tick it off in the shop. Typing a pantry item's name marks that item instead
 - Pantry items that are out, running low (at or below your "running low at" amount, or likely to run out within 2 days), or marked **Refill needed**
 - **Bought** logs your usual amount at your usual price, **Price & shop** to enter details, **Not now** hides an item until you next buy it
+- **Not sure to buy again:** one tap keeps an item off the shopping list for good, in its own pantry group, until you change your mind
 - An estimate of the total at last prices
 
 **Weekly summary** (Monday to Sunday)

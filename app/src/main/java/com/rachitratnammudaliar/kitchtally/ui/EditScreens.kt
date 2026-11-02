@@ -156,6 +156,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var packText by rememberSaveable { mutableStateOf("") }
     var stockText by rememberSaveable { mutableStateOf("") }
     var refill by rememberSaveable { mutableStateOf(false) }
+    var unsure by rememberSaveable { mutableStateOf(false) }
     var notes by rememberSaveable { mutableStateOf("") }
     var photo by rememberSaveable { mutableStateOf("") }
     var originalPhoto by rememberSaveable { mutableStateOf("") }
@@ -172,6 +173,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             packText = if (existing.packSize > 0) Qty.format(existing.packSize) else ""
             stockText = Qty.format(maxOf(0.0, state?.stock(existing.id) ?: 0.0))
             refill = existing.refillNeeded
+            unsure = existing.unsure
             notes = existing.notes
             photo = existing.photoFile
             originalPhoto = existing.photoFile
@@ -204,7 +206,8 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             unit = unit,
             life = life,
             lowAt = Qty.round(lowAtValue ?: 1.0),
-            refillNeeded = refill,
+            refillNeeded = refill && !unsure,
+            unsure = unsure,
             notes = notes.trim(),
             photoFile = photo,
             step = stepValue ?: 1.0,
@@ -326,7 +329,8 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             )
             Hint("Eggs: count them in pieces and set packs of 10. Then ＋ adds a whole pack and − takes one egg.")
 
-            SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it }
+            SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it; if (it) unsure = false }
+            SwitchRow("Not sure to buy again", "Never put it on the shopping list until you switch this off", unsure) { unsure = it; if (it) refill = false }
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it.take(500) },

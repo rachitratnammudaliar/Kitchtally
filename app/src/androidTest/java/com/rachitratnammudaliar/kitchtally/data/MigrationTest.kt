@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Data saved by version 1.0 must survive the update to 1.1 unchanged. */
+/** Data saved by version 1.0 must survive every update unchanged. */
 @RunWith(AndroidJUnit4::class)
 class MigrationTest {
     private val dbName = "migration-test.db"
@@ -39,7 +39,7 @@ class MigrationTest {
             db.version = 1
         }
 
-        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2).build()
+        val room = Room.databaseBuilder(context, AppDatabase::class.java, dbName).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
         try {
             runBlocking {
                 val dao = room.pantry()
@@ -48,6 +48,8 @@ class MigrationTest {
                 assertEquals(1.0, items.getValue("Bread").step, 0.0)
                 assertEquals(0.5, items.getValue("Rice").step, 0.0)
                 assertEquals(false, items.getValue("Rice").hiddenFromList)
+                assertEquals(false, items.getValue("Rice").unsure)
+                assertEquals(0.0, items.getValue("Rice").packSize, 0.0)
                 assertEquals(true, items.getValue("Bread").refillNeeded)
                 assertEquals("5 kg bag", items.getValue("Rice").notes)
                 assertEquals(4.5, dao.stockOf(2), 0.0)

@@ -147,6 +147,7 @@ final class KitchtallyTests: XCTestCase {
         items[0].step = 0.25
         items[0].hiddenFromList = true
         items[0].packSize = 5
+        items[0].unsure = true
         let again = try Backup.decode(Backup.encode(items, c.events, notes: [ShoppingNote(text: "Candles", createdAt: 9)]))
         XCTAssertEqual(again.items, items)
         XCTAssertEqual(again.notes.map(\.text), ["Candles"])
