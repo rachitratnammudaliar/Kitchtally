@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// % items are typed as percentages (25) but stored as a fraction of one (0.25).
+private func toDisplay(_ unit: QtyUnit, _ value: Double) -> String { unit.isLevel ? "\(Qty.percent(value))" : Qty.format(value) }
+private func fromDisplay(_ unit: QtyUnit, _ value: Double) -> Double { unit.isLevel ? Qty.round(value / 100) : value }
+
 struct EditItemView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -15,6 +19,9 @@ struct EditItemView: View {
     @State private var stockText: String
     @State private var refill: Bool
     @State private var unsure: Bool
+    @State private var countMeals: Bool
+    @State private var mealsText: String
+    @State private var lowInMeals: Bool
     @State private var notes: String
     @State private var photo: String
     @State private var showErrors = false
@@ -23,32 +30,63 @@ struct EditItemView: View {
     @State private var unitTouched = false
     @State private var lifeTouched = false
     @State private var packTouched = false
+    @State private var mealsTouched = false
+    @State private var lowTouched = false
     private let originalPhoto: String
 
     private func applySuggestion() {
         guard existing == nil else { return }
         let guess = Suggestions.forName(name)
         if !categoryTouched { category = guess?.category ?? "Other" }
-        if !unitTouched { unit = guess?.unit ?? .PACKET }
+        if !unitTouched { changeUnit(guess?.unit ?? .PACKET) }
         if !lifeTouched { life = guess?.life ?? .MEDIUM }
         if !packTouched { packText = (guess?.packSize ?? 0) > 0 ? Qty.format(guess!.packSize) : "" }
+        if !mealsTouched { countMeals = guess?.countMeals ?? false }
+    }
+
+    /// Switching between % and other units converts what's typed; "running low at" follows unless set by hand.
+    private func changeUnit(_ next: QtyUnit) {
+        let old = unit
+        if old.isLevel != next.isLevel {
+            if let v = Double(stockText.replacingOccurrences(of: ",", with: ".")) { stockText = toDisplay(next, fromDisplay(old, v)) }
+            stepText = ""
+        }
+        if !(lowInMeals && countMeals) && !(lowTouched && old.isLevel == next.isLevel) {
+            lowAt = toDisplay(next, Pantry.defaultLowAt(next))
+        }
+        unit = next
     }
 
     init(existing: Item?) {
         self.existing = existing
+        let u = existing?.unitValue ?? .PACKET
         _name = State(initialValue: existing?.name ?? "")
         _category = State(initialValue: existing?.category ?? "Other")
-        _unit = State(initialValue: existing?.unitValue ?? .PACKET)
+        _unit = State(initialValue: u)
         _life = State(initialValue: existing?.lifeValue ?? .MEDIUM)
-        _lowAt = State(initialValue: Qty.format(existing?.lowAt ?? 1))
-        _stepText = State(initialValue: existing.map { Qty.format($0.step) } ?? "")
+        if let e = existing {
+            _lowAt = State(initialValue: e.lowInMeals ? Qty.format(e.lowAt) : toDisplay(u, e.lowAt))
+        } else {
+            _lowAt = State(initialValue: toDisplay(u, Pantry.defaultLowAt(u)))
+        }
+        _stepText = State(initialValue: existing.map { toDisplay(u, $0.step) } ?? "")
         _packText = State(initialValue: (existing?.packSize ?? 0) > 0 ? Qty.format(existing!.packSize) : "")
         _stockText = State(initialValue: "")
         _refill = State(initialValue: existing?.refillNeeded ?? false)
         _unsure = State(initialValue: existing?.unsure ?? false)
+        _countMeals = State(initialValue: existing?.countMeals ?? false)
+        let pack = (existing?.packSize ?? 0) > 0 ? existing!.packSize : 1
+        _mealsText = State(initialValue: (existing?.mealsPerUnit ?? 0) > 0 ? Qty.format(Qty.round(existing!.mealsPerUnit * pack)) : "")
+        _lowInMeals = State(initialValue: existing?.lowInMeals ?? false)
         _notes = State(initialValue: existing?.notes ?? "")
         _photo = State(initialValue: existing?.photoFile ?? "")
         originalPhoto = existing?.photoFile ?? ""
+        _categoryTouched = State(initialValue: existing != nil)
+        _unitTouched = State(initialValue: existing != nil)
+        _lifeTouched = State(initialValue: existing != nil)
+        _packTouched = State(initialValue: existing != nil)
+        _mealsTouched = State(initialValue: existing != nil)
+        _lowTouched = State(initialValue: existing != nil)
     }
 
     private func number(_ text: String) -> Double? {
@@ -57,14 +95,21 @@ struct EditItemView: View {
         return Qty.round(v)
     }
 
+    private var lowInMealsNow: Bool { lowInMeals && countMeals }
     private var nameError: Bool { name.trimmingCharacters(in: .whitespaces).isEmpty }
-    private var stepValue: Double? { stepText.trimmingCharacters(in: .whitespaces).isEmpty ? Pantry.defaultStep(unit) : Qty.parse(stepText) }
+    private var lowValue: Double? { number(lowAt).map { lowInMealsNow ? $0 : fromDisplay(unit, $0) } }
+    private var stockValue: Double? { number(stockText).map { fromDisplay(unit, $0) } }
+    private var stepValue: Double? {
+        stepText.trimmingCharacters(in: .whitespaces).isEmpty ? Pantry.defaultStep(unit) : Qty.parse(stepText).map { fromDisplay(unit, $0) }
+    }
     private var duplicate: Bool {
         let n = name.trimmingCharacters(in: .whitespaces).lowercased()
         return !n.isEmpty && store.items.contains { $0.id != existing?.id && $0.name.trimmingCharacters(in: .whitespaces).lowercased() == n }
     }
-    private var packValue: Double? { packText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : Qty.parse(packText) }
-    private var invalid: Bool { nameError || number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil || category.isEmpty }
+    private var packValue: Double? { packText.trimmingCharacters(in: .whitespaces).isEmpty || unit.isLevel ? 0 : Qty.parse(packText) }
+    private var mealsValue: Double? { !countMeals || mealsText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : Qty.parse(mealsText) }
+    private var invalid: Bool { nameError || lowValue == nil || stockValue == nil || stepValue == nil || packValue == nil || mealsValue == nil || category.isEmpty }
+    private var inUnit: String { unit.isLevel ? "%" : unit.plural }
 
     private func save() {
         if invalid {
@@ -76,14 +121,18 @@ struct EditItemView: View {
         item.category = category
         item.unit = unit.rawValue
         item.life = life.rawValue
-        item.lowAt = number(lowAt) ?? 1
+        item.lowAt = lowValue ?? 1
         item.refillNeeded = refill && !unsure
         item.unsure = unsure
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.photoFile = photo
         item.step = stepValue ?? 1
         item.packSize = packValue ?? 0
-        let target = number(stockText) ?? 0
+        item.countMeals = countMeals
+        let meals = mealsValue ?? 0
+        item.mealsPerUnit = meals > 0 ? Qty.round(meals / ((packValue ?? 0) > 0 ? packValue! : 1)) : 0
+        item.lowInMeals = lowInMealsNow
+        let target = stockValue ?? 0
         if let e = existing {
             // An empty "amount now" keeps the current amount.
             if !stockText.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -100,6 +149,15 @@ struct EditItemView: View {
     private func cancel() {
         if !photo.isEmpty && photo != originalPhoto { PhotoStore.delete(photo) }
         dismiss()
+    }
+
+    private func numberRow(_ title: String, _ placeholder: String, _ text: Binding<String>, _ suffix: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(placeholder, text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80)
+            Text(suffix).foregroundColor(.secondary)
+        }
     }
 
     var body: some View {
@@ -127,10 +185,15 @@ struct EditItemView: View {
                     if showErrors && category.isEmpty { Text("Choose or type a category").font(.caption).foregroundColor(.red) }
                 }
 
-                Section("Counted in") {
-                    Picker("Unit", selection: Binding(get: { unit }, set: { unit = $0; unitTouched = true })) {
-                        ForEach(QtyUnit.allCases) { Text($0.plural.capitalized).tag($0) }
+                Section {
+                    Picker("Unit", selection: Binding(get: { unit }, set: { changeUnit($0); unitTouched = true })) {
+                        ForEach(QtyUnit.allCases) { Text($0.title).tag($0) }
                     }
+                } header: {
+                    Text("Counted in")
+                } footer: {
+                    if unit.isLevel { Text("Shows how full it is: 100%, 75%, 50%, 25%. Good for bread, oil, sauces and opened packets.") }
+                    else if unit.priceDivisor > 1 { Text("Prices are still shown \(unit.priceLabel).") }
                 }
 
                 Section {
@@ -144,38 +207,60 @@ struct EditItemView: View {
                 }
 
                 Section {
-                    HStack {
-                        Text(existing == nil ? "You have now" : "Amount now")
-                        Spacer()
-                        TextField(existing == nil ? "0" : Qty.format(max(0, store.stock(existing!.id))), text: $stockText)
-                            .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
-                        Text(unit.plural).foregroundColor(.secondary)
+                    numberRow(existing == nil ? "You have now" : "Amount now",
+                              existing == nil ? "0" : toDisplay(unit, max(0, store.stock(existing!.id))), $stockText, inUnit)
+                    if unit.isLevel {
+                        Picker("How full", selection: Binding(get: { Int(stockText) ?? -1 }, set: { stockText = "\($0)" })) {
+                            ForEach([100, 75, 50, 25, 0], id: \.self) { Text($0 == 0 ? "Empty" : "\($0)%").tag($0) }
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    HStack {
-                        Text("Running low at")
-                        Spacer()
-                        TextField("1", text: $lowAt).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
-                        Text(unit.plural).foregroundColor(.secondary)
+                    Toggle(isOn: Binding(get: { countMeals }, set: { on in
+                        countMeals = on
+                        mealsTouched = true
+                        if !on && lowInMeals {
+                            lowInMeals = false
+                            lowAt = toDisplay(unit, Pantry.defaultLowAt(unit))
+                        }
+                    })) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Count meals")
+                            Text("Leave it off for salt, oil, spices and the like").font(.caption).foregroundColor(.secondary)
+                        }
                     }
-                    HStack {
-                        Text("Each − or Shared uses")
-                        Spacer()
-                        TextField(Qty.format(Pantry.defaultStep(unit)), text: $stepText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
-                        Text(unit.plural).foregroundColor(.secondary)
+                    if countMeals {
+                        numberRow((packValue ?? 0) > 0 ? "1 pack makes about" : unit.isLevel ? "A full one makes about" : "1 \(unit.singular) makes about", "e.g. 4", $mealsText, "meals")
                     }
-                    HStack {
-                        Text("Comes in packs of")
-                        Spacer()
-                        TextField("optional", text: Binding(get: { packText }, set: { packText = $0; packTouched = true })).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
-                        Text(unit.plural).foregroundColor(.secondary)
+                } footer: {
+                    Text(countMeals ? "A packet of spaghetti might make 4 meals, one potato about half a meal (0.5). You can also fill it in when you buy." : (existing == nil ? "" : "Leave \"amount now\" empty to keep the current amount."))
+                }
+
+                Section {
+                    if countMeals {
+                        Picker("Count in", selection: Binding(get: { lowInMealsNow }, set: { inMeals in
+                            guard inMeals != lowInMeals else { return }
+                            lowInMeals = inMeals
+                            lowAt = inMeals ? Qty.format(Pantry.defaultLowMeals) : toDisplay(unit, Pantry.defaultLowAt(unit))
+                        })) {
+                            Text("In meals").tag(true)
+                            Text(unit.isLevel ? "In %" : "In \(unit.plural)").tag(false)
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    if showErrors && (number(lowAt) == nil || number(stockText) == nil || stepValue == nil || packValue == nil) {
+                    numberRow("Running low at", "1", Binding(get: { lowAt }, set: { lowAt = $0; lowTouched = true }), lowInMealsNow ? "meals" : inUnit)
+                    numberRow("Each − or Shared uses", toDisplay(unit, Pantry.defaultStep(unit)), $stepText, inUnit)
+                    if !unit.isLevel {
+                        numberRow("Comes in packs of", "optional", Binding(get: { packText }, set: { packText = $0; packTouched = true }), unit.plural)
+                    }
+                    if showErrors && (lowValue == nil || stockValue == nil || stepValue == nil || packValue == nil || mealsValue == nil) {
                         Text("Use a number, 0 or more").font(.caption).foregroundColor(.red)
                     }
                     Toggle("Refill needed", isOn: Binding(get: { refill }, set: { refill = $0; if $0 { unsure = false } }))
                     Toggle("Not sure to buy again", isOn: Binding(get: { unsure }, set: { unsure = $0; if $0 { refill = false } }))
+                } header: {
+                    Text("Running low")
                 } footer: {
-                    Text("It goes on the shopping list at or below \"running low at\". \"Each − uses\" is, for example, 0.5 kg of rice per meal. For eggs, count in pieces with packs of 10: ＋ adds a pack, − takes one egg." + (existing == nil ? "" : " Leave \"amount now\" empty to keep the current amount."))
+                    Text("It says \"almost out\" and goes on the shopping list at or below \"running low at\"." + (countMeals ? " It turns red at 1 meal." : "") + (unit.isLevel ? " For oil, each use might be 5 or 10%." : " For eggs, count in pieces with packs of 10: ＋ adds a pack, − takes one egg."))
                 }
 
                 Section {
@@ -213,6 +298,7 @@ struct PurchaseView: View {
     @State private var receipt = ""
     @State private var originalReceipt = ""
     @State private var note = ""
+    @State private var mealsText = ""
     @State private var showErrors = false
 
     private var existing: Event? { target.eventId == 0 ? nil : store.events.first { $0.id == target.eventId } }
@@ -223,9 +309,17 @@ struct PurchaseView: View {
     private var qty: Double? { entered.map { packMode ? Qty.round($0 * packSize) : $0 } }
     private var price: Int64? { priceText.isEmpty ? nil : Money.parseToMinor(priceText) }
     private var priceError: Bool { !priceText.isEmpty && price == nil }
+    private var unit: QtyUnit { store.item(target.itemId)?.unitValue ?? .PIECE }
     private var total: Int64? {
         guard let p = price, let q = qty else { return nil }
-        return perUnit ? Pantry.totalMinor(p, entered ?? q) : p
+        if !perUnit { return p }
+        return packMode ? Pantry.totalMinor(p, entered ?? q) : Pantry.totalMinor(p, q, unit)
+    }
+    private var mealsValue: Double? { mealsText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : Qty.parse(mealsText) }
+    /// What this costs per unit (per kg for grams), for the price check.
+    private var myUnitPrice: Int64? {
+        guard let t = total, t > 0, let q = qty else { return nil }
+        return Pantry.unitPriceMinor(Entry(type: .BOUGHT, date: today, quantity: q, priceMinor: t), unit)
     }
 
     private func load() {
@@ -247,18 +341,23 @@ struct PurchaseView: View {
             if item.packSize > 0 {
                 inPacks = true
                 if let p = Pantry.priceFor(entries, item.packSize) { priceText = Money.minorToInput(p) }
-            } else if let last = last, let unitPrice = Pantry.unitPriceMinor(last) {
-                perUnit = item.unitValue == .KG || item.unitValue == .LITRE
-                priceText = Money.minorToInput(unitPrice)
+            } else {
+                if !item.unitValue.isLevel { qtyText = Qty.format(Pantry.buyAmount(item.unitValue, entries)) }
+                if let last = last, let unitPrice = Pantry.unitPriceMinor(last, item.unitValue) {
+                    // Kilos, grams and litres are priced per kg or litre.
+                    perUnit = item.unitValue.byWeight
+                    priceText = Money.minorToInput(perUnit ? unitPrice : (Pantry.priceFor(entries, Qty.parse(qtyText) ?? 1) ?? unitPrice))
+                }
             }
         }
     }
 
     private func save() {
-        guard let q = qty, !priceError else {
+        guard let q = qty, !priceError, let meals = mealsValue else {
             showErrors = true
             return
         }
+        if meals > 0, let per = Meals.perUnit(q, meals) { store.setMealsPerUnit(target.itemId, per) }
         store.saveEvent(Event(
             id: existing?.id ?? 0,
             itemId: target.itemId,
@@ -281,7 +380,6 @@ struct PurchaseView: View {
 
     var body: some View {
         let item = store.item(target.itemId)
-        let unit = item?.unitValue ?? .PIECE
         NavigationStack {
             Form {
                 Section {
@@ -293,7 +391,7 @@ struct PurchaseView: View {
                         .pickerStyle(.segmented)
                     }
                     HStack {
-                        Text(packMode ? "How many packs" : "How many \(unit.plural)")
+                        Text(packMode ? "How many packs" : unit.byWeight ? "How much (\(unit.plural))" : "How many \(unit.plural)")
                         Spacer()
                         TextField("1", text: $qtyText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 90)
                     }
@@ -315,9 +413,30 @@ struct PurchaseView: View {
                     }
                     if showErrors && priceError { Text("Enter a price, up to 2 decimals").font(.caption).foregroundColor(.red) }
                     if perUnit, let t = total, let e = entered, let p = price {
-                        Text("\(Qty.format(e)) × \(Money.format(p, store.currency)) = \(Money.format(t, store.currency))").font(.caption).foregroundColor(.secondary)
-                    } else if !perUnit, let t = total, let q = qty, q != 1 {
-                        Text("\(Money.format(Pantry.totalMinor(t, 1 / q), store.currency)) \(unit.priceLabel)").font(.caption).foregroundColor(.secondary)
+                        Text("\(packMode ? Qty.format(e) : unit.label(qty ?? e)) × \(Money.format(p, store.currency)) = \(Money.format(t, store.currency))").font(.caption).foregroundColor(.secondary)
+                    } else if !perUnit, let q = qty, q != 1 || unit.priceDivisor > 1, let up = myUnitPrice {
+                        Text("\(Money.format(up, store.currency)) \(unit.priceLabel)").font(.caption).foregroundColor(.secondary)
+                    }
+                    if let up = myUnitPrice, let cheaper = Pantry.cheaperElsewhere(store.entries(target.itemId), unit, up, shop: shop, today) {
+                        Text("💡 Cheaper at \(cheaper.shop) last time: \(Money.format(cheaper.unitPriceMinor, store.currency)) \(unit.priceLabel)")
+                            .font(.caption).foregroundColor(.orange)
+                    }
+                }
+
+                if let item = item, item.countMeals {
+                    let guess = item.mealsPerUnit > 0 ? qty.map { Meals.left($0, item.mealsPerUnit) } : nil
+                    Section {
+                        HStack {
+                            Text("These make about")
+                            Spacer()
+                            TextField(guess.map { Qty.approx($0) } ?? "e.g. 4", text: $mealsText).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80)
+                            Text("meals").foregroundColor(.secondary)
+                        }
+                        if showErrors && mealsValue == nil { Text("A number above 0, or leave it empty").font(.caption).foregroundColor(.red) }
+                    } header: {
+                        Text("Meals (optional)")
+                    } footer: {
+                        Text(guess.map { "Leave it empty to keep about \(Qty.approx($0))." } ?? "Look at what you bought and guess. You can change it any time.")
                     }
                 }
 

@@ -25,6 +25,14 @@ struct AdjustSheet: View {
     }
 
     var body: some View {
+        if item.unitValue.isLevel {
+            LevelSheet(item: item, onDone: onDone)
+        } else {
+            amountSheet
+        }
+    }
+
+    private var amountSheet: some View {
         let unit = item.unitValue
         let stock = store.stock(item.id)
         let hint = Pantry.packsHint(stock, item.packSize)
@@ -65,6 +73,59 @@ struct AdjustSheet: View {
             .navigationTitle(item.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+/// For % items: tap how full it is now, or type an exact %.
+struct LevelSheet: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let item: Item
+    let onDone: (String, @escaping () -> Void) -> Void
+    @State private var text = ""
+
+    private func run(_ action: Store.Adjust, _ amount: Double) {
+        if let result = store.adjust(item, action, amount) { onDone(result.0, result.1) }
+        dismiss()
+    }
+
+    var body: some View {
+        let stock = store.stock(item.id)
+        let percent = Int(text.trimmingCharacters(in: .whitespaces)).flatMap { (0...1000).contains($0) ? $0 : nil }
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Now: \(stockLabel(item, stock))").foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach([100, 75, 50, 25, 0], id: \.self) { p in
+                            Button(p == 0 ? "Empty" : "\(p)%") { run(.set, Double(p) / 100) }
+                                .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                        }
+                    }
+                    HStack {
+                        TextField("Exact %", text: $text).keyboardType(.numberPad)
+                        Button("Set") { run(.set, Double(percent ?? 0) / 100) }.disabled(percent == nil)
+                    }
+                } header: {
+                    Text("How much is left?")
+                } footer: {
+                    Text("Over 100% means more than one: 150% is one full and one half.")
+                }
+                Section {
+                    HStack(spacing: 8) {
+                        Button("Used \(item.unitValue.label(item.step))") { run(.used, item.step) }
+                            .buttonStyle(.bordered).disabled(stock <= 0).frame(maxWidth: .infinity)
+                        Button("Bought a new one") { run(.bought, 1) }
+                            .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .navigationTitle(item.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .onAppear { text = "\(Qty.percent(max(0, stock)))" }
         }
         .presentationDetents([.medium, .large])
     }

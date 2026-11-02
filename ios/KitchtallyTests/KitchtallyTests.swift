@@ -34,7 +34,9 @@ final class KitchtallyTests: XCTestCase {
 
     func testFreshness() {
         XCTAssertTrue(Pantry.checkFreshness([bought(6)], .SHORT, today))
-        XCTAssertFalse(Pantry.checkFreshness([bought(4)], .SHORT, today))
+        XCTAssertFalse(Pantry.checkFreshness([bought(3)], .SHORT, today))
+        XCTAssertTrue(Pantry.checkFreshness([bought(11)], .MEDIUM, today))
+        XCTAssertFalse(Pantry.checkFreshness([bought(10)], .MEDIUM, today))
         XCTAssertFalse(Pantry.checkFreshness([bought(60)], .LONG, today))
         XCTAssertFalse(Pantry.checkFreshness([bought(6), used(1)], .SHORT, today))
     }
@@ -174,5 +176,76 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(again.notes.map(\.text), ["Candles"])
         XCTAssertEqual(again.events.map(\.quantity), [5, 0.5])
         XCTAssertThrowsError(try Backup.decode(Data("nope".utf8)))
+    }
+
+    func testPercentItems() {
+        let u = QtyUnit.LEVEL
+        XCTAssertEqual(u.label(0.8), "80%")
+        XCTAssertEqual(u.label(1), "1 full")
+        XCTAssertEqual(u.label(1.5), "1 full + 50%")
+        XCTAssertEqual(u.leftLabel(0.8), "80% left")
+        XCTAssertEqual(u.leftLabel(1), "Full")
+        XCTAssertEqual(u.leftLabel(2), "2 full")
+        XCTAssertEqual(Pantry.defaultStep(u), 0.25)
+        XCTAssertEqual(Pantry.buyAmount(u, [bought(3)]), 1)
+        let bread = Counting(unit: u, lowAt: 0.25)
+        XCTAssertEqual(Pantry.status([bought(2), used(1, 0.25), used(0, 0.25)], bread, today), .ok)
+        XCTAssertEqual(Pantry.status([bought(2), used(1, 0.5), used(0, 0.25)], bread, today), .low)
+        XCTAssertEqual(Pantry.status([bought(9), used(1, 0.9)], Counting(unit: u, lowAt: 0.1), today), .low)
+        XCTAssertEqual(Pantry.status([bought(9), used(1, 0.85)], Counting(unit: u, lowAt: 0.1), today), .ok)
+    }
+
+    func testGramsArePricedPerKg() {
+        XCTAssertEqual(QtyUnit.GRAM.label(500), "500 g")
+        XCTAssertEqual(Pantry.unitPriceMinor(bought(1, 500, 120), .GRAM), 240)
+        XCTAssertEqual(Pantry.totalMinor(200, 500, .GRAM), 100)
+        XCTAssertEqual(Pantry.buyAmount(.GRAM, []), 500)
+        XCTAssertEqual(Pantry.unitPriceMinor(bought(1, 200, 300), .ML), 1500)
+        XCTAssertEqual(Pantry.unitPriceMinor(bought(1, 0.5, 120), .KG), 240)
+    }
+
+    func testMealsLeftAndRed() {
+        XCTAssertEqual(Meals.label(Meals.left(5, 1.6)), "about 8 meals")
+        XCTAssertEqual(Meals.label(1), "1 meal")
+        XCTAssertEqual(Meals.label(0.4), "less than 1 meal")
+        XCTAssertEqual(Meals.perUnit(5, 8), 1.6)
+        XCTAssertEqual(Meals.cookAmount(1, 4), 0.25)
+        XCTAssertEqual(Meals.cookAmount(0.5, 0), 0.5)
+        let potatoes = Counting(unit: .PIECE, lowAt: 2, mealsPerUnit: 0.6, lowInMeals: true)
+        XCTAssertEqual(Pantry.status([bought(3, 5)], potatoes, today), .ok)
+        XCTAssertEqual(Pantry.status([bought(3, 5), used(1, 2)], potatoes, today), .low)
+        XCTAssertEqual(Pantry.status([bought(3, 5), used(1, 4)], potatoes, today), .last)
+        let spaghetti = Counting(unit: .PACKET, lowAt: 0, mealsPerUnit: 4)
+        XCTAssertEqual(Pantry.status([bought(3, 1), used(1, 0.5)], spaghetti, today), .ok)
+        XCTAssertEqual(Pantry.status([bought(3, 1), used(1, 0.75)], spaghetti, today), .last)
+    }
+
+    func testCheaperElsewhereAndSpending() {
+        let entries = [bought(30, 1, 199, "IKI"), bought(10, 1, 159, "Lidl"), bought(5, 1, 189, "Maxima"), bought(400, 1, 99, "Rimi")]
+        XCTAssertEqual(Pantry.lastShop(entries), "Maxima")
+        XCTAssertEqual(Pantry.cheaperElsewhere(entries, .PIECE, 199, shop: "IKI", today), Pantry.Cheaper(shop: "Lidl", unitPriceMinor: 159))
+        XCTAssertNil(Pantry.cheaperElsewhere(entries, .PIECE, 150, shop: "IKI", today))
+        let byItem: [Int64: [Entry]] = [1: [bought(2, 1, 100), bought(40, 1, 999)], 2: [bought(0, 1, 250), used(0)]]
+        XCTAssertEqual(Pantry.spentBetween(byItem, today.plusDays(-10), today), 350)
+    }
+
+    func testSuggestionsCountMealsAndPieces() {
+        XCTAssertEqual(Suggestions.forName("Red Onion")?.unit, .PIECE)
+        XCTAssertEqual(Suggestions.forName("Potato")?.countMeals, true)
+        XCTAssertEqual(Suggestions.forName("Pasta/spagheti")?.countMeals, true)
+        XCTAssertEqual(Suggestions.forName("Salt")?.countMeals, false)
+        XCTAssertEqual(Suggestions.forName("Oil")?.unit, .LEVEL)
+        XCTAssertEqual(Suggestions.forName("Bread")?.unit, .LEVEL)
+        XCTAssertEqual(Suggestions.forName("Tomato ketchup")?.unit, .LEVEL)
+        XCTAssertEqual(Suggestions.forName("Chilli powder")?.category, "Spices")
+        XCTAssertEqual(Suggestions.forName("Toothbrush")?.unit, .PIECE)
+    }
+
+    func testBackupKeepsMeals() throws {
+        let item = Item(id: 3, name: "Potato", unit: QtyUnit.PIECE.rawValue, countMeals: true, mealsPerUnit: 0.6, lowInMeals: true)
+        let back = try Backup.decode(Backup.encode([item], []))
+        XCTAssertEqual(back.items.first?.countMeals, true)
+        XCTAssertEqual(back.items.first?.mealsPerUnit, 0.6)
+        XCTAssertEqual(back.items.first?.lowInMeals, true)
     }
 }

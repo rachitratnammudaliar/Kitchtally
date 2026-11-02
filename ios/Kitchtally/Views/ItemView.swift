@@ -101,13 +101,21 @@ struct ItemView: View {
             Section {
                 InfoRow(label: "Category", value: "\(Categories.emojiFor(item.category)) \(item.category)")
                 InfoRow(label: "Lasts", value: item.lifeValue.label, note: item.lifeValue.description)
-                InfoRow(label: "Running low at", value: unit.label(item.lowAt))
+                if item.countMeals {
+                    let per = item.packSize > 0 ? "1 pack" : unit.isLevel ? "A full one" : "1 \(unit.singular)"
+                    InfoRow(
+                        label: "Meals",
+                        value: item.mealsPerUnit > 0 ? (stock > 0 ? "\(Meals.label(Meals.left(stock, item.mealsPerUnit))) left" : "None left") : "Not set yet",
+                        note: item.mealsPerUnit > 0 ? "\(per) makes about \(Qty.format(Qty.round(item.mealsPerUnit * (item.packSize > 0 ? item.packSize : 1))))" : "Edit the item, or fill it in when you buy"
+                    )
+                }
+                InfoRow(label: "Running low at", value: item.lowInMeals && item.countMeals ? (item.lowAt == 1 ? "1 meal" : "\(Qty.format(item.lowAt)) meals") : unit.label(item.lowAt))
                 InfoRow(label: "Each tap", value: "− uses \(unit.label(item.step))", note: "＋ adds \(unit.label(Pantry.buyAmount(unit, entries, packSize: item.packSize)))")
                 if let rate = Pantry.dailyUse(entries, today) {
                     let perWeek = Qty.approx(rate * 7)
-                    InfoRow(label: "You use", value: "about \(perWeek) \(perWeek == "1" ? unit.singular : unit.plural) a week")
+                    InfoRow(label: "You use", value: "about " + (unit.isLevel ? unit.label(Qty.round(rate * 7)) : "\(perWeek) \(perWeek == "1" ? unit.singular : unit.plural)") + " a week")
                 }
-                if let last = lastPriced, let unitPrice = Pantry.unitPriceMinor(last) {
+                if let last = lastPriced, let unitPrice = Pantry.unitPriceMinor(last, unit) {
                     InfoRow(label: "Last price", value: "\(Money.format(unitPrice, store.currency)) \(unit.priceLabel)",
                             note: [last.shop, last.date.format(.long)].filter { !$0.isEmpty }.joined(separator: " · "))
                 }
