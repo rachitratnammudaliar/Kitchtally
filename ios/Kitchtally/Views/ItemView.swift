@@ -106,7 +106,7 @@ struct ItemView: View {
                     InfoRow(
                         label: "Meals",
                         value: item.mealsPerUnit > 0 ? (stock > 0 ? "\(Meals.label(Meals.left(stock, item.mealsPerUnit))) left" : "None left") : "Not set yet",
-                        note: item.mealsPerUnit > 0 ? "\(per) makes about \(Qty.format(Qty.round(item.mealsPerUnit * (item.packSize > 0 ? item.packSize : 1))))" : "Edit the item, or fill it in when you buy"
+                        note: item.mealsPerUnit > 0 ? "\(per) makes about \(Qty.format(Qty.round(item.mealsPerUnit * (item.packSize > 0 ? item.packSize : 1)))) meals" : "Edit the item, or fill it in when you buy"
                     )
                 }
                 InfoRow(label: "Running low at", value: item.lowInMeals && item.countMeals ? (item.lowAt == 1 ? "1 meal" : "\(Qty.format(item.lowAt)) meals") : unit.label(item.lowAt))

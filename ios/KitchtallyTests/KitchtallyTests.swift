@@ -207,6 +207,7 @@ final class KitchtallyTests: XCTestCase {
     func testMealsLeftAndRed() {
         XCTAssertEqual(Meals.label(Meals.left(5, 1.6)), "about 8 meals")
         XCTAssertEqual(Meals.label(1), "1 meal")
+        XCTAssertEqual(Meals.label(1.5), "1 to 2 meals")
         XCTAssertEqual(Meals.label(0.4), "less than 1 meal")
         XCTAssertEqual(Meals.perUnit(5, 8), 1.6)
         XCTAssertEqual(Meals.cookAmount(1, 4), 0.25)

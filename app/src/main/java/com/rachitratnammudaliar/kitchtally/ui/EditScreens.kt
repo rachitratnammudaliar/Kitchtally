@@ -350,7 +350,7 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
                 isError = showErrors && stockValue == null,
                 error = "A number, 0 or more",
             )
-            if (unitNow.isLevel) ChipRow(listOf(100, 75, 50, 25, 0), stockText.toIntOrNull(), { if (it == 0) "Empty" else "$it%" }, { stockText = it.toString() })
+            if (unitNow.isLevel) ChipRow(listOf(100, 75, 50, 25, 0), stockText.toIntOrNull(), { "$it%" }, { stockText = it.toString() })
 
             SwitchRow("Count meals", "Shows how many meals are left. Leave it off for salt, oil, spices and the like.", countMeals) {
                 countMeals = it

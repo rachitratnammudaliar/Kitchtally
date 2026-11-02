@@ -185,7 +185,7 @@ fun ItemScreen(
                         InfoRow(
                             "Meals",
                             if (item.mealsPerUnit > 0) (if (stock > 0) "${Meals.label(Meals.left(stock, item.mealsPerUnit))} left" else "None left") else "Not set yet",
-                            if (item.mealsPerUnit > 0) "${if (item.packSize > 0) "1 pack" else if (unit.isLevel) "A full one" else "1 ${unit.singular}"} makes about ${Qty.format(Qty.round(item.mealsPerUnit * (if (item.packSize > 0) item.packSize else 1.0)))}" else "Edit the item, or fill it in when you buy",
+                            if (item.mealsPerUnit > 0) "${if (item.packSize > 0) "1 pack" else if (unit.isLevel) "A full one" else "1 ${unit.singular}"} makes about ${Qty.format(Qty.round(item.mealsPerUnit * (if (item.packSize > 0) item.packSize else 1.0)))} meals" else "Edit the item, or fill it in when you buy",
                         )
                         HorizontalDivider()
                     }

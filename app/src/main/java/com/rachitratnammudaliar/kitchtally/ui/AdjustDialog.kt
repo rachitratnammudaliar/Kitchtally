@@ -103,7 +103,7 @@ private fun LevelDialog(item: Item, stock: Double, onDismiss: () -> Unit, onActi
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Now: ${stockLabel(item, stock)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 SectionLabel("How much is left?")
-                ChipRow(listOf(100, 75, 50, 25, 0), null, { if (it == 0) "Empty" else "$it%" }, { onAction(PantryViewModel.Adjust.SET, it / 100.0) })
+                ChipRow(listOf(100, 75, 50, 25, 0), null, { "$it%" }, { onAction(PantryViewModel.Adjust.SET, it / 100.0) })
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField(
                         value = text,

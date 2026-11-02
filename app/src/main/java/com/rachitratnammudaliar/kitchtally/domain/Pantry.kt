@@ -106,12 +106,13 @@ data class Counting(
 object Meals {
     fun left(stock: Double, mealsPerUnit: Double): Double = Qty.round(maxOf(0.0, stock) * mealsPerUnit)
 
-    /** "about 6 meals", "1 meal", "less than 1 meal", "no meals". */
+    /** "about 6 meals", "1 to 2 meals", "1 meal", "less than 1 meal", "no meals". */
     fun label(meals: Double): String {
         val whole = Math.floor(Qty.round(meals) + 1e-9).toLong()
         return when {
             meals <= 0 -> "no meals"
             whole == 0L -> "less than 1 meal"
+            whole == 1L && Qty.round(meals) > 1.0 -> "1 to 2 meals"
             whole == 1L -> "1 meal"
             else -> "about $whole meals"
         }

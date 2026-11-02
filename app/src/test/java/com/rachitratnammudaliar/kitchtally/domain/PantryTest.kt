@@ -211,6 +211,7 @@ class PantryTest {
     fun mealsLeftAndRed() {
         assertEquals("about 8 meals", Meals.label(Meals.left(5.0, 1.6)))
         assertEquals("1 meal", Meals.label(1.0))
+        assertEquals("1 to 2 meals", Meals.label(1.5))
         assertEquals("less than 1 meal", Meals.label(0.4))
         assertEquals("no meals", Meals.label(0.0))
         assertEquals(1.6, Meals.perUnit(5.0, 8.0)!!, 0.0)

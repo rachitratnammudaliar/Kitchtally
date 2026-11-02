@@ -211,7 +211,7 @@ struct EditItemView: View {
                               existing == nil ? "0" : toDisplay(unit, max(0, store.stock(existing!.id))), $stockText, inUnit)
                     if unit.isLevel {
                         Picker("How full", selection: Binding(get: { Int(stockText) ?? -1 }, set: { stockText = "\($0)" })) {
-                            ForEach([100, 75, 50, 25, 0], id: \.self) { Text($0 == 0 ? "Empty" : "\($0)%").tag($0) }
+                            ForEach([100, 75, 50, 25, 0], id: \.self) { Text("\($0)%").tag($0) }
                         }
                         .pickerStyle(.segmented)
                     }

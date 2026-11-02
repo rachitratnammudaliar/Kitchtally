@@ -138,7 +138,7 @@ enum Meals {
         let whole = Int64((Qty.round(meals) + 1e-9).rounded(.down))
         if meals <= 0 { return "no meals" }
         if whole == 0 { return "less than 1 meal" }
-        if whole == 1 { return "1 meal" }
+        if whole == 1 { return Qty.round(meals) > 1 ? "1 to 2 meals" : "1 meal" }
         return "about \(whole) meals"
     }
 

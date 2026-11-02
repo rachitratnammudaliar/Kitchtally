@@ -100,7 +100,7 @@ struct LevelSheet: View {
                     Text("Now: \(stockLabel(item, stock))").foregroundColor(.secondary)
                     HStack(spacing: 6) {
                         ForEach([100, 75, 50, 25, 0], id: \.self) { p in
-                            Button(p == 0 ? "Empty" : "\(p)%") { run(.set, Double(p) / 100) }
+                            Button("\(p)%") { run(.set, Double(p) / 100) }
                                 .buttonStyle(.bordered).frame(maxWidth: .infinity)
                         }
                     }
