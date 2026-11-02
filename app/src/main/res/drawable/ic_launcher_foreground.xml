@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kitchtally: a jar with tally marks. Safe zone is the centre 66dp of 108dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M41,33 L67,33 A3,3 0 0 1 70,36 L70,40 L38,40 L38,36 A3,3 0 0 1 41,33 Z"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M44,43 L64,43 A7,7 0 0 1 71,50 L71,70 A7,7 0 0 1 64,77 L44,77 A7,7 0 0 1 37,70 L37,50 A7,7 0 0 1 44,43 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M46,52 L46,68 M51,52 L51,68 M56,52 L56,68 M61,52 L61,68 M43,65 L64,55"
+        android:strokeColor="#F4BC6B"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

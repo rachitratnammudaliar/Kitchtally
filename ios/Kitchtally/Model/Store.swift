@@ -1,0 +1,336 @@
+import Foundation
+import UIKit
+
+struct Item: Identifiable, Equatable {
+    var id: Int64 = 0
+    var name: String
+    var category: String = "Groceries"
+    var unit: String = QtyUnit.PACKET.rawValue
+    var life: String = Life.MEDIUM.rawValue
+    var lowAt: Double = 1
+    var refillNeeded: Bool = false
+    var photoFile: String = ""
+    var notes: String = ""
+    var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+
+    var unitValue: QtyUnit { QtyUnit.from(unit) }
+    var lifeValue: Life { Life.from(life) }
+}
+
+struct Event: Identifiable, Equatable {
+    var id: Int64 = 0
+    var itemId: Int64
+    var type: String
+    var epochDay: Int
+    var quantity: Double
+    var priceMinor: Int64? = nil
+    var shop: String = ""
+    var receiptFile: String = ""
+    var note: String = ""
+    var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+
+    var typeValue: EventType { EventType.from(type) }
+    var date: Day { Day(epochDay: epochDay) }
+    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop) }
+}
+
+/// The same JSON format as the Android app's backups. The app's own data file also keeps photo names.
+enum Backup {
+    static let format = "kitchtally-backup"
+
+    enum BackupError: LocalizedError {
+        case notABackup
+        var errorDescription: String? { "This file isn't a Kitchtally backup." }
+    }
+
+    static func encode(_ items: [Item], _ events: [Event], includePhotos: Bool = false) -> Data {
+        let ids = Set(items.map(\.id))
+        let itemsJson: [[String: Any]] = items.map { i in
+            var o: [String: Any] = [
+                "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
+                "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
+            ]
+            if includePhotos { o["photoFile"] = i.photoFile }
+            return o
+        }
+        let eventsJson: [[String: Any]] = events.filter { ids.contains($0.itemId) }.map { e in
+            var o: [String: Any] = [
+                "item": e.itemId, "type": e.type, "epochDay": e.epochDay, "quantity": e.quantity,
+                "priceMinor": e.priceMinor.map { $0 as Any } ?? NSNull(), "shop": e.shop, "note": e.note, "createdAt": e.createdAt,
+            ]
+            if includePhotos { o["receiptFile"] = e.receiptFile }
+            return o
+        }
+        let root: [String: Any] = ["format": format, "version": 1, "items": itemsJson, "events": eventsJson]
+        return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+    }
+
+    private static func string(_ o: [String: Any], _ key: String, _ fallback: String = "") -> String {
+        (o[key] as? String) ?? fallback
+    }
+
+    private static func number(_ o: [String: Any], _ key: String) -> NSNumber? {
+        guard let n = o[key] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        return n
+    }
+
+    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event]) {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              root["format"] as? String == format else { throw BackupError.notABackup }
+        var items: [Item] = []
+        for case let o as [String: Any] in root["items"] as? [Any] ?? [] {
+            let name = string(o, "name").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, let ref = number(o, "ref")?.int64Value else { continue }
+            var lowAt = number(o, "lowAt")?.doubleValue ?? 1
+            if lowAt.isNaN || lowAt < 0 { lowAt = 1 }
+            let category = string(o, "category", "Groceries").trimmingCharacters(in: .whitespaces)
+            items.append(Item(
+                id: ref,
+                name: String(name.prefix(60)),
+                category: String((category.isEmpty ? "Groceries" : category).prefix(40)),
+                unit: QtyUnit.from(string(o, "unit")).rawValue,
+                life: Life.from(string(o, "life")).rawValue,
+                lowAt: min(lowAt, 10_000),
+                refillNeeded: (o["refillNeeded"] as? Bool) ?? false,
+                photoFile: includePhotos ? string(o, "photoFile") : "",
+                notes: String(string(o, "notes").prefix(500)),
+                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+            ))
+        }
+        let refs = Set(items.map(\.id))
+        var events: [Event] = []
+        for case let o as [String: Any] in root["events"] as? [Any] ?? [] {
+            guard let ref = number(o, "item")?.int64Value, refs.contains(ref),
+                  let day = number(o, "epochDay")?.intValue,
+                  let quantity = number(o, "quantity")?.doubleValue, !quantity.isNaN, quantity != 0 else { continue }
+            let type = EventType.from(string(o, "type"))
+            if type != .ADJUST && quantity < 0 { continue }
+            let price = number(o, "priceMinor")?.int64Value
+            events.append(Event(
+                itemId: ref,
+                type: type.rawValue,
+                epochDay: day,
+                quantity: quantity,
+                priceMinor: type == .BOUGHT && (price ?? -1) >= 0 ? price : nil,
+                shop: String(string(o, "shop").trimmingCharacters(in: .whitespaces).prefix(40)),
+                receiptFile: includePhotos ? string(o, "receiptFile") : "",
+                note: String(string(o, "note").prefix(200)),
+                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+            ))
+        }
+        return (items, events)
+    }
+}
+
+/// Photos are resized and kept in the app's private storage.
+enum PhotoStore {
+    static var directory: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Kitchtally/photos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func save(_ image: UIImage) -> String? {
+        let maxSide: CGFloat = 1280
+        let scale = min(1, maxSide / max(image.size.width, image.size.height))
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let resized = UIGraphicsImageRenderer(size: size).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+        guard let data = resized.jpegData(compressionQuality: 0.85) else { return nil }
+        let name = "\(UUID().uuidString).jpg"
+        do {
+            try data.write(to: directory.appendingPathComponent(name), options: [.atomic, .completeFileProtection])
+            return name
+        } catch {
+            return nil
+        }
+    }
+
+    static func load(_ name: String) -> UIImage? {
+        name.isEmpty ? nil : UIImage(contentsOfFile: directory.appendingPathComponent(name).path)
+    }
+
+    static func delete(_ name: String) {
+        if !name.isEmpty { try? FileManager.default.removeItem(at: directory.appendingPathComponent(name)) }
+    }
+}
+
+/// Everything, saved on this iPhone only after every change.
+@MainActor
+final class Store: ObservableObject {
+    @Published private(set) var items: [Item] = []
+    @Published private(set) var events: [Event] = []
+    @Published var problem: String?
+    @Published var currency: String {
+        didSet { UserDefaults.standard.set(currency, forKey: "currency") }
+    }
+
+    private let fileURL: URL
+    private var nextEventId: Int64 = 1
+
+    init(directory: URL? = nil) {
+        let dir = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Kitchtally", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        fileURL = dir.appendingPathComponent("pantry.json")
+        currency = UserDefaults.standard.string(forKey: "currency") ?? "EUR"
+        load()
+    }
+
+    // MARK: Reading
+
+    func item(_ id: Int64) -> Item? { items.first { $0.id == id } }
+    func history(_ id: Int64) -> [Event] {
+        events.filter { $0.itemId == id }.sorted { $0.epochDay != $1.epochDay ? $0.epochDay > $1.epochDay : $0.createdAt > $1.createdAt }
+    }
+    func entries(_ id: Int64) -> [Entry] { events.filter { $0.itemId == id }.map(\.entry) }
+    func stock(_ id: Int64) -> Double { Pantry.stock(entries(id)) }
+    var entriesByItem: [Int64: [Entry]] { Dictionary(grouping: events, by: \.itemId).mapValues { $0.map(\.entry) } }
+    var usedShops: [String] { events.sorted { $0.createdAt > $1.createdAt }.map(\.shop).filter { !$0.isEmpty } }
+    var usedCategories: [String] { items.map(\.category) }
+
+    func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), lowAt: item.lowAt, today) }
+    func onShoppingList(_ item: Item, _ today: Day) -> Bool { item.refillNeeded || status(item, today) != .ok }
+
+    // MARK: Saving
+
+    private func load() {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        do {
+            let contents = try Backup.decode(try Data(contentsOf: fileURL), includePhotos: true)
+            items = contents.items
+            events = contents.events.map { e in
+                var copy = e
+                copy.id = nextEventId
+                nextEventId += 1
+                return copy
+            }
+        } catch {
+            let kept = fileURL.deletingLastPathComponent().appendingPathComponent("pantry-unreadable-\(Int(Date().timeIntervalSince1970)).json")
+            try? FileManager.default.moveItem(at: fileURL, to: kept)
+            problem = "Your saved data couldn't be read, so Kitchtally started empty. The old file was kept."
+        }
+    }
+
+    private func persist() {
+        do {
+            try Backup.encode(items, events, includePhotos: true).write(to: fileURL, options: [.atomic, .completeFileProtection])
+        } catch {
+            problem = "Couldn't save: \(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    func saveItem(_ item: Item, startStock: Double = 0) -> Int64 {
+        if item.id == 0 {
+            var copy = item
+            copy.id = (items.map(\.id).max() ?? 0) + 1
+            items.append(copy)
+            if startStock > 0 {
+                appendEvent(Event(itemId: copy.id, type: EventType.ADJUST.rawValue, epochDay: Day.today().epochDay, quantity: startStock, note: "Starting stock"))
+            }
+            persist()
+            return copy.id
+        }
+        if let old = self.item(item.id), old.photoFile != item.photoFile { PhotoStore.delete(old.photoFile) }
+        items = items.map { $0.id == item.id ? item : $0 }
+        persist()
+        return item.id
+    }
+
+    func deleteItem(_ id: Int64) {
+        if let i = self.item(id) { PhotoStore.delete(i.photoFile) }
+        events.filter { $0.itemId == id }.forEach { PhotoStore.delete($0.receiptFile) }
+        items.removeAll { $0.id == id }
+        events.removeAll { $0.itemId == id }
+        persist()
+    }
+
+    func setRefillNeeded(_ id: Int64, _ needed: Bool) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id { copy.refillNeeded = needed }
+            return copy
+        }
+        persist()
+    }
+
+    private func appendEvent(_ e: Event) {
+        var copy = e
+        copy.id = nextEventId
+        nextEventId += 1
+        events.append(copy)
+    }
+
+    /// Logs a quick change today. Returns its id for Undo.
+    @discardableResult
+    func log(_ itemId: Int64, _ type: EventType, quantity: Double = 1, priceMinor: Int64? = nil, shop: String = "") -> Int64 {
+        appendEvent(Event(itemId: itemId, type: type.rawValue, epochDay: Day.today().epochDay, quantity: quantity, priceMinor: priceMinor, shop: shop))
+        if type == .BOUGHT { clearRefill(itemId) }
+        persist()
+        return nextEventId - 1
+    }
+
+    /// The quick "+": one more, today, at last time's shop and unit price.
+    @discardableResult
+    func quickBuy(_ itemId: Int64) -> Int64 {
+        let list = entries(itemId)
+        let last = Pantry.lastPriced(list)
+        let price = last.flatMap { Pantry.unitPriceMinor($0) }.map { Pantry.totalMinor($0, 1) }
+        let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(list)?.shop ?? "")
+        return log(itemId, .BOUGHT, quantity: 1, priceMinor: price, shop: shop)
+    }
+
+    private func clearRefill(_ id: Int64) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id { copy.refillNeeded = false }
+            return copy
+        }
+    }
+
+    func saveEvent(_ e: Event) {
+        if e.id == 0 {
+            appendEvent(e)
+        } else {
+            if let old = events.first(where: { $0.id == e.id }), old.receiptFile != e.receiptFile { PhotoStore.delete(old.receiptFile) }
+            events = events.map { $0.id == e.id ? e : $0 }
+        }
+        if e.typeValue == .BOUGHT { clearRefill(e.itemId) }
+        persist()
+    }
+
+    func deleteEvent(_ id: Int64) {
+        if let e = events.first(where: { $0.id == id }) { PhotoStore.delete(e.receiptFile) }
+        events.removeAll { $0.id == id }
+        persist()
+    }
+
+    // MARK: Backup
+
+    func exportFile() throws -> URL {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("kitchtally-backup-\(f.string(from: Date())).json")
+        try Backup.encode(items, events).write(to: url, options: .atomic)
+        return url
+    }
+
+    func importData(_ data: Data) throws -> Int {
+        let contents = try Backup.decode(data)
+        var nextItem = (items.map(\.id).max() ?? 0) + 1
+        for item in contents.items {
+            var copy = item
+            copy.id = nextItem
+            items.append(copy)
+            for e in contents.events where e.itemId == item.id {
+                var ev = e
+                ev.itemId = nextItem
+                appendEvent(ev)
+            }
+            nextItem += 1
+        }
+        persist()
+        return contents.items.count
+    }
+}

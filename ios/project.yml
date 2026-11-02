@@ -1,0 +1,49 @@
+name: Kitchtally
+options:
+  bundleIdPrefix: com.rachitratnammudaliar
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Kitchtally:
+    type: application
+    platform: iOS
+    sources: [Kitchtally]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rachitratnammudaliar.kitchtally
+        PRODUCT_NAME: Kitchtally
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Kitchtally
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.lifestyle
+        INFOPLIST_KEY_NSCameraUsageDescription: "Take photos of your groceries and receipts. Photos stay on this iPhone."
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ENABLE_PREVIEWS: YES
+  KitchtallyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [KitchtallyTests]
+    dependencies:
+      - target: Kitchtally
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.rachitratnammudaliar.kitchtally.tests
+schemes:
+  Kitchtally:
+    build:
+      targets:
+        Kitchtally: all
+        KitchtallyTests: [test]
+    test:
+      targets: [KitchtallyTests]
