@@ -21,7 +21,8 @@ class BackupTest {
         )
         val notes = listOf(ShoppingNote(id = 4, text = "Candles", createdAt = 9))
         val back = Backup.decode(Backup.encode(listOf(rice, bread), events, notes))
-        assertEquals(listOf(rice.copy(photoFile = ""), bread), back.items)
+        // Old category names come back under their new names.
+        assertEquals(listOf(rice.copy(photoFile = "", category = "Staples"), bread), back.items)
         assertEquals(events.map { it.copy(id = 0, receiptFile = "") }, back.events)
         assertEquals(listOf(ShoppingNote(text = "Candles", createdAt = 9)), back.notes)
     }

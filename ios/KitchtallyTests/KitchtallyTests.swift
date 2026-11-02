@@ -155,6 +155,7 @@ final class KitchtallyTests: XCTestCase {
         let c = try Backup.decode(Data(json.utf8))
         XCTAssertEqual(c.items.count, 1)
         XCTAssertEqual(c.items[0].lowAt, 1.5)
+        XCTAssertEqual(c.items[0].category, "Staples")
         XCTAssertTrue(c.items[0].refillNeeded)
         XCTAssertEqual(c.events.count, 2)
         XCTAssertEqual(c.events[0].priceMinor, 1245)
