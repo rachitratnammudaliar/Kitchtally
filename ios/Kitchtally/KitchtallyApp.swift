@@ -86,7 +86,7 @@ struct StockPill: View {
     var body: some View {
         let colors: (Color, Color) = {
             switch status {
-            case .out: return (Color.red.opacity(0.15), .red)
+            case .out, .last: return (Color.red.opacity(0.15), .red)
             case .low: return (Color.orange.opacity(0.18), Color(rgb: 0x9A5B00))
             case .ok: return (Color(rgb: 0x2E6B3A).opacity(0.14), Color(rgb: 0x2E6B3A))
             }
@@ -100,6 +100,15 @@ struct StockPill: View {
             .contentShape(Capsule())
             .onTapGesture { onTap?() }
             .accessibilityAddTraits(onTap == nil ? [] : .isButton)
+    }
+}
+
+/// Text colour for an "almost out" or "last meal" line.
+func statusColor(_ status: StockStatus) -> Color {
+    switch status {
+    case .out, .last: return .red
+    case .low: return Color(rgb: 0x9A5B00)
+    case .ok: return .secondary
     }
 }
 

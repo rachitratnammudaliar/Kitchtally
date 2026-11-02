@@ -3,7 +3,8 @@ import Foundation
 // MARK: - Units, life, events
 
 enum QtyUnit: String, CaseIterable, Identifiable {
-    case PIECE, PACKET, BOTTLE, BOX, BAG, KG, LITRE
+    // Same order as Android's "Counted in" chips.
+    case PIECE, PACKET, BOTTLE, BOX, BAG, LEVEL, GRAM, KG, ML, LITRE
     var id: String { rawValue }
 
     var singular: String {
@@ -13,7 +14,10 @@ enum QtyUnit: String, CaseIterable, Identifiable {
         case .BOTTLE: return "bottle"
         case .BOX: return "box"
         case .BAG: return "bag"
+        case .LEVEL: return "full one"
+        case .GRAM: return "g"
         case .KG: return "kg"
+        case .ML: return "ml"
         case .LITRE: return "litre"
         }
     }
@@ -25,21 +29,54 @@ enum QtyUnit: String, CaseIterable, Identifiable {
         case .BOTTLE: return "bottles"
         case .BOX: return "boxes"
         case .BAG: return "bags"
+        case .LEVEL: return "full ones"
+        case .GRAM: return "g"
         case .KG: return "kg"
+        case .ML: return "ml"
         case .LITRE: return "litres"
+        }
+    }
+
+    /// Name on the "Counted in" choices.
+    var title: String {
+        switch self {
+        case .LEVEL: return "% left"
+        case .GRAM: return "Grams"
+        case .KG: return "Kg"
+        case .ML: return "Ml"
+        default: return plural.prefix(1).uppercased() + plural.dropFirst()
         }
     }
 
     var priceLabel: String {
         switch self {
-        case .PIECE: return "each"
-        case .KG: return "per kg"
-        case .LITRE: return "per litre"
+        case .PIECE, .LEVEL: return "each"
+        case .KG, .GRAM: return "per kg"
+        case .LITRE, .ML: return "per litre"
         default: return "per \(singular)"
         }
     }
 
-    func label(_ qty: Double) -> String { "\(Qty.format(qty)) \(qty == 1 ? singular : plural)" }
+    /// Prices are shown per kg or litre, so grams and millilitres divide by 1000.
+    var priceDivisor: Double { self == .GRAM || self == .ML ? 1000 : 1 }
+    var isLevel: Bool { self == .LEVEL }
+    var byWeight: Bool { self == .GRAM || self == .KG || self == .ML || self == .LITRE }
+
+    /// An amount: "2 packets", "500 g", and for % items "25%", "1 full", "1 full + 50%".
+    func label(_ qty: Double) -> String {
+        guard isLevel else { return "\(Qty.format(qty)) \(qty == 1 ? singular : plural)" }
+        let whole = Int((Qty.round(qty) + 1e-9).rounded(.down))
+        let pct = Qty.percent(qty - Double(whole))
+        if whole == 0 { return "\(pct)%" }
+        return pct == 0 ? "\(whole) full" : "\(whole) full + \(pct)%"
+    }
+
+    /// What's left: "2 packets left", "80% left", "Full", "2 full".
+    func leftLabel(_ stock: Double) -> String {
+        if !isLevel { return "\(label(stock)) left" }
+        if Qty.round(stock) == 1 { return "Full" }
+        return stock < 1 ? "\(label(stock)) left" : label(stock)
+    }
 
     static func from(_ name: String) -> QtyUnit { QtyUnit(rawValue: name) ?? .PIECE }
 }
@@ -58,17 +95,17 @@ enum Life: String, CaseIterable, Identifiable {
 
     var description: String {
         switch self {
-        case .SHORT: return "Days, like bread or milk"
-        case .MEDIUM: return "1 to 3 weeks, like onions or eggs"
-        case .LONG: return "Months, like rice, atta or pasta"
+        case .SHORT: return "2 to 3 days, like bread or milk"
+        case .MEDIUM: return "1 week to 10 days, like vegetables or eggs"
+        case .LONG: return "2 weeks to a month or more, like rice, salt or oil. No freshness reminder"
         }
     }
 
     var freshDays: Int {
         switch self {
-        case .SHORT: return 5
-        case .MEDIUM: return 21
-        case .LONG: return 180
+        case .SHORT: return 3
+        case .MEDIUM: return 10
+        case .LONG: return 30
         }
     }
 
@@ -80,7 +117,42 @@ enum EventType: String {
     static func from(_ name: String) -> EventType { EventType(rawValue: name) ?? .ADJUST }
 }
 
-enum StockStatus { case out, low, ok }
+/// out: none left. last: only one meal left (red). low: running low. ok: plenty.
+enum StockStatus: Int { case out, last, low, ok }
+
+/// How an item is counted and when it's low.
+struct Counting {
+    var unit: QtyUnit = .PIECE
+    var lowAt: Double = 1
+    /// Meals one unit makes (one full packet for % items); 0 if not counting meals.
+    var mealsPerUnit: Double = 0
+    var lowInMeals = false
+    var countsMeals: Bool { mealsPerUnit > 0 }
+}
+
+enum Meals {
+    static func left(_ stock: Double, _ mealsPerUnit: Double) -> Double { Qty.round(max(0, stock) * mealsPerUnit) }
+
+    /// "about 6 meals", "1 meal", "less than 1 meal", "no meals".
+    static func label(_ meals: Double) -> String {
+        let whole = Int64((Qty.round(meals) + 1e-9).rounded(.down))
+        if meals <= 0 { return "no meals" }
+        if whole == 0 { return "less than 1 meal" }
+        if whole == 1 { return "1 meal" }
+        return "about \(whole) meals"
+    }
+
+    /// What cooking one meal takes: one meal's worth when meals are counted, otherwise one tap.
+    static func cookAmount(_ step: Double, _ mealsPerUnit: Double) -> Double {
+        mealsPerUnit > 0 ? max(0.001, Qty.round(1 / mealsPerUnit)) : step
+    }
+
+    /// Meals per unit from "these 5 onions make about 8 meals".
+    static func perUnit(_ quantity: Double, _ meals: Double) -> Double? {
+        guard quantity > 0, meals > 0 else { return nil }
+        return (meals / quantity * 10_000).rounded() / 10_000
+    }
+}
 
 struct Entry {
     let type: EventType
@@ -128,33 +200,40 @@ struct Suggestion: Equatable {
     let unit: QtyUnit
     let life: Life
     var packSize: Double = 0
+    var countMeals: Bool = false
 }
 
 enum Suggestions {
     // Checked in order, so more specific names come first.
     private static let rules: [([String], Suggestion)] = [
-        (["ice cream"], Suggestion(category: "Snacks", unit: .PACKET, life: .MEDIUM, packSize: 0)),
-        (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0)),
-        (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach", "sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .BOTTLE, life: .LONG, packSize: 0)),
-        (["body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "toothbrush", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "razor", "shaving", "lip balm", "hair oil", "hair gel", "sanitary", "pads", "cotton"], Suggestion(category: "Personal care", unit: .PIECE, life: .LONG, packSize: 0)),
-        (["sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto"], Suggestion(category: "Sauces & spreads", unit: .BOTTLE, life: .LONG, packSize: 0)),
-        (["veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint"], Suggestion(category: "Vegetables", unit: .PACKET, life: .SHORT, packSize: 0)),
-        (["onion", "potato", "garlic", "ginger", "pumpkin"], Suggestion(category: "Vegetables", unit: .KG, life: .MEDIUM, packSize: 0)),
-        (["carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili"], Suggestion(category: "Vegetables", unit: .KG, life: .SHORT, packSize: 0)),
-        (["apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach"], Suggestion(category: "Fruit", unit: .PIECE, life: .SHORT, packSize: 0)),
-        (["egg"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .MEDIUM, packSize: 10.0)),
-        (["milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly"], Suggestion(category: "Dairy & eggs", unit: .BOTTLE, life: .SHORT, packSize: 0)),
-        (["yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .SHORT, packSize: 0)),
-        (["cheese", "butter", "ghee", "paneer", "cream"], Suggestion(category: "Dairy & eggs", unit: .PACKET, life: .MEDIUM, packSize: 0)),
-        (["chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince"], Suggestion(category: "Meat & protein", unit: .PACKET, life: .SHORT, packSize: 0)),
-        (["bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav"], Suggestion(category: "Bread & bakery", unit: .PACKET, life: .SHORT, packSize: 0)),
-        (["masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing"], Suggestion(category: "Spices", unit: .PACKET, life: .LONG, packSize: 0)),
-        (["rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa"], Suggestion(category: "Staples", unit: .KG, life: .LONG, packSize: 0)),
-        (["oil"], Suggestion(category: "Staples", unit: .BOTTLE, life: .LONG, packSize: 0)),
-        (["pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "oats", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "salt", "sugar", "cereal", "cornflakes", "muesli", "vermicelli"], Suggestion(category: "Staples", unit: .PACKET, life: .LONG, packSize: 0)),
-        (["coffee", "tea", "chai"], Suggestion(category: "Drinks", unit: .PACKET, life: .LONG, packSize: 0)),
-        (["juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi"], Suggestion(category: "Drinks", unit: .BOTTLE, life: .MEDIUM, packSize: 0)),
-        (["chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake"], Suggestion(category: "Snacks", unit: .PACKET, life: .LONG, packSize: 0)),
+        ([
+        listOf("ice cream"], Suggestion(category: "Snacks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
+        (["sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
+        (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach"], Suggestion(category: "Household", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["toothbrush", "razor", "shaving", "sanitary", "pads", "cotton"], Suggestion(category: "Personal care", unit: .PIECE, life: .LONG, packSize: 0, countMeals: false)),
+        (["body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "hair oil", "hair gel"], Suggestion(category: "Personal care", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto"], Suggestion(category: "Sauces & spreads", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint"], Suggestion(category: "Vegetables", unit: .LEVEL, life: .MEDIUM, packSize: 0, countMeals: true)),
+        (["chilli powder", "chili powder", "chilli flakes", "chili flakes"], Suggestion(category: "Spices", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["garlic", "ginger"], Suggestion(category: "Vegetables", unit: .PIECE, life: .LONG, packSize: 0, countMeals: false)),
+        (["onion", "potato", "carrot", "tomato", "cucumber", "capsicum", "bell pepper", "cabbage", "cauliflower", "broccoli", "pumpkin", "green peas", "beans", "zucchini", "courgette", "eggplant", "aubergine", "brinjal", "beetroot", "radish", "okra", "bhindi", "chilli", "chili"], Suggestion(category: "Vegetables", unit: .PIECE, life: .MEDIUM, packSize: 0, countMeals: true)),
+        (["apple", "banana", "orange", "grape", "mango", "kiwi", "pear", "berr", "strawberr", "blueberr", "raspberr", "lemon", "lime", "melon", "pineapple", "avocado", "pomegranate", "plum", "peach"], Suggestion(category: "Fruit", unit: .PIECE, life: .MEDIUM, packSize: 0, countMeals: false)),
+        (["egg"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .MEDIUM, packSize: 10.0, countMeals: true)),
+        (["milk", "substitute", "oat drink", "soy drink", "almond drink", "oatly"], Suggestion(category: "Dairy & eggs", unit: .LEVEL, life: .SHORT, packSize: 0, countMeals: false)),
+        (["yogurt", "yoghurt", "curd", "dahi", "kefir", "skyr"], Suggestion(category: "Dairy & eggs", unit: .PIECE, life: .MEDIUM, packSize: 0, countMeals: false)),
+        (["cheese", "butter", "ghee", "paneer", "cream"], Suggestion(category: "Dairy & eggs", unit: .LEVEL, life: .MEDIUM, packSize: 0, countMeals: false)),
+        (["chicken", "fish", "meat", "mutton", "lamb", "beef", "pork", "turkey", "salmon", "tuna", "prawn", "shrimp", "tofu", "sausage", "ham", "keema", "mince"], Suggestion(category: "Meat & protein", unit: .PACKET, life: .SHORT, packSize: 0, countMeals: true)),
+        (["bread", "bun", "roti", "naan", "tortilla", "wrap", "croissant", "bagel", "pav"], Suggestion(category: "Bread & bakery", unit: .LEVEL, life: .SHORT, packSize: 0, countMeals: false)),
+        (["masala", "spice", "turmeric", "haldi", "cumin", "jeera", "chilli powder", "chili powder", "pepper", "garam", "coriander powder", "cinnamon", "oregano", "paprika", "seasoning", "cardamom", "clove", "mustard seed", "hing"], Suggestion(category: "Spices", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["rice", "atta", "flour", "maida", "besan", "suji", "sooji", "semolina", "poha", "quinoa"], Suggestion(category: "Staples", unit: .KG, life: .LONG, packSize: 0, countMeals: true)),
+        (["oil"], Suggestion(category: "Staples", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["salt", "sugar"], Suggestion(category: "Staples", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["oats", "cereal", "cornflakes", "muesli"], Suggestion(category: "Staples", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: true)),
+        (["pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "vermicelli"], Suggestion(category: "Staples", unit: .PACKET, life: .LONG, packSize: 0, countMeals: true)),
+        (["coffee", "tea", "chai"], Suggestion(category: "Drinks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi"], Suggestion(category: "Drinks", unit: .BOTTLE, life: .MEDIUM, packSize: 0, countMeals: false)),
+        (["chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake"], Suggestion(category: "Snacks", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
     ]
 
     /// True if [keyword] starts a word in [text]: "egg" matches "Eggs" but "peas" doesn't match "chickpeas".
@@ -190,6 +269,9 @@ enum Shops {
 enum Qty {
     static func round(_ q: Double) -> Double { (q * 1000).rounded() / 1000 }
 
+    /// 0.8 -> 80.
+    static func percent(_ fraction: Double) -> Int { Int((fraction * 100).rounded(.toNearestOrAwayFromZero)) }
+
     static func format(_ q: Double) -> String {
         let r = round(q)
         if r == r.rounded() { return String(Int64(r)) }
@@ -223,8 +305,27 @@ enum Pantry {
         })
     }
 
-    /// Default "uses per tap": half a kilo or litre, otherwise one.
-    static func defaultStep(_ unit: QtyUnit) -> Double { unit == .KG || unit == .LITRE ? 0.5 : 1 }
+    /// Default "uses per tap": half a kilo or litre, 100 g or ml, a quarter of a % item, otherwise one.
+    static func defaultStep(_ unit: QtyUnit) -> Double {
+        switch unit {
+        case .KG, .LITRE: return 0.5
+        case .GRAM, .ML: return 100
+        case .LEVEL: return 0.25
+        default: return 1
+        }
+    }
+
+    /// Default "running low at": 25% for % items, 200 g or ml, half a kilo or litre, otherwise one.
+    static func defaultLowAt(_ unit: QtyUnit) -> Double {
+        switch unit {
+        case .LEVEL: return 0.25
+        case .GRAM, .ML: return 200
+        case .KG, .LITRE: return 0.5
+        default: return 1
+        }
+    }
+
+    static let defaultLowMeals = 2.0
 
     /// What one tap of − or Shared takes: the item's step, never more than what's left.
     static func useAmount(_ step: Double, _ stock: Double) -> Double { max(0, Qty.round(min(max(step, 0.001), stock))) }
@@ -232,8 +333,9 @@ enum Pantry {
     /// What one tap of ＋ adds: a whole pack if it comes in packs; for kilos and litres, the size you usually buy; otherwise one.
     static func buyAmount(_ unit: QtyUnit, _ entries: [Entry], packSize: Double = 0) -> Double {
         if packSize > 0 { return packSize }
-        guard unit == .KG || unit == .LITRE, let q = lastBought(entries)?.quantity, q > 0 else { return 1 }
-        return q
+        guard unit.byWeight else { return 1 }
+        if let q = lastBought(entries)?.quantity, q > 0 { return q }
+        return unit.priceDivisor > 1 ? 500 : 1
     }
 
     static func expectedPriceMinor(_ unit: QtyUnit, _ entries: [Entry], packSize: Double = 0) -> Int64? {
@@ -265,13 +367,52 @@ enum Pantry {
         entries.filter { $0.type == .BOUGHT && $0.priceMinor != nil && $0.quantity > 0 }.max { $0.date < $1.date }
     }
 
-    static func unitPriceMinor(_ e: Entry) -> Int64? {
+    /// Price per unit; grams and ml give per kg and per litre.
+    static func unitPriceMinor(_ e: Entry, _ unit: QtyUnit = .PIECE) -> Int64? {
         guard let price = e.priceMinor, e.quantity > 0 else { return nil }
-        return Int64((Double(price) / e.quantity).rounded(.toNearestOrAwayFromZero))
+        return Int64((Double(price) * unit.priceDivisor / e.quantity).rounded(.toNearestOrAwayFromZero))
     }
 
-    static func totalMinor(_ unitPrice: Int64, _ quantity: Double) -> Int64 {
-        Int64((Double(unitPrice) * quantity).rounded(.toNearestOrAwayFromZero))
+    /// 1.5 kg at €1.20/kg = €1.80; 500 g at €2/kg = €1.
+    static func totalMinor(_ unitPrice: Int64, _ quantity: Double, _ unit: QtyUnit = .PIECE) -> Int64 {
+        Int64((Double(unitPrice) * quantity / unit.priceDivisor).rounded(.toNearestOrAwayFromZero))
+    }
+
+    /// The shop it was last bought at, or "".
+    static func lastShop(_ entries: [Entry]) -> String {
+        entries.filter { $0.type == .BOUGHT && !$0.shop.trimmingCharacters(in: .whitespaces).isEmpty }
+            .max { $0.date < $1.date }?.shop.trimmingCharacters(in: .whitespaces) ?? ""
+    }
+
+    struct Cheaper: Equatable {
+        let shop: String
+        let unitPriceMinor: Int64
+    }
+
+    /// The cheapest other shop by its latest unit price in the last [days] days, if cheaper.
+    static func cheaperElsewhere(_ entries: [Entry], _ unit: QtyUnit, _ unitPrice: Int64, shop: String, _ today: Day, days: Int = 180) -> Cheaper? {
+        let from = today.plusDays(-days)
+        let mine = shop.trimmingCharacters(in: .whitespaces).lowercased()
+        let others = entries.filter {
+            let s = $0.shop.trimmingCharacters(in: .whitespaces)
+            return $0.type == .BOUGHT && !s.isEmpty && s.lowercased() != mine && !($0.date < from)
+        }
+        var best: Cheaper?
+        for (_, list) in Dictionary(grouping: others, by: { $0.shop.trimmingCharacters(in: .whitespaces).lowercased() }) {
+            guard let latest = list.filter({ $0.priceMinor != nil }).max(by: { $0.date < $1.date }),
+                  let price = unitPriceMinor(latest, unit), price < unitPrice else { continue }
+            if best == nil || price < best!.unitPriceMinor {
+                best = Cheaper(shop: latest.shop.trimmingCharacters(in: .whitespaces), unitPriceMinor: price)
+            }
+        }
+        return best
+    }
+
+    /// Total paid from [from] to [to], both included.
+    static func spentBetween(_ entriesByItem: [Int64: [Entry]], _ from: Day, _ to: Day) -> Int64 {
+        entriesByItem.values.reduce(0) { sum, entries in
+            sum + entries.filter { $0.type == .BOUGHT && !($0.date < from) && !($0.date > to) }.reduce(0) { $0 + ($1.priceMinor ?? 0) }
+        }
     }
 
     static func dailyUse(_ entries: [Entry], _ today: Day, windowDays: Int = 60) -> Double? {
@@ -291,9 +432,21 @@ enum Pantry {
     }
 
     static func status(_ entries: [Entry], lowAt: Double, _ today: Day) -> StockStatus {
+        status(entries, Counting(lowAt: lowAt), today)
+    }
+
+    /// Same rules as Android: red at one meal; low at "running low at" (meals or the unit);
+    /// pieces, packets and kilos also when likely to run out within 2 days.
+    static func status(_ entries: [Entry], _ c: Counting, _ today: Day) -> StockStatus {
         let s = stock(entries)
         if s <= 0 { return .out }
-        if s <= lowAt { return .low }
+        if c.countsMeals {
+            let meals = Meals.left(s, c.mealsPerUnit)
+            if meals <= 1 { return .last }
+            if c.lowInMeals && meals <= c.lowAt { return .low }
+        }
+        if !(c.lowInMeals && c.countsMeals) && s <= c.lowAt { return .low }
+        if c.unit.isLevel || c.countsMeals { return .ok }
         if let left = daysLeft(entries, today), left <= 2 { return .low }
         return .ok
     }

@@ -9,6 +9,8 @@ struct ShoppingView: View {
     @State private var path: [Int64] = []
     @State private var newText = ""
     @State private var info: String?
+    /// Items ticked while shopping, for "Done shopping".
+    @State private var ticked = Set<Int64>()
 
     private func add() {
         let text = newText.trimmingCharacters(in: .whitespaces)
@@ -19,12 +21,10 @@ struct ShoppingView: View {
 
     var body: some View {
         let list = store.items.filter { store.onShoppingList($0, today) }
-        let titles = ["Out", "Running low", "Refill needed"]
-        let byTitle: [String: [Item]] = [
-            "Out": list.filter { store.status($0, today) == .out },
-            "Running low": list.filter { store.status($0, today) == .low },
-            "Refill needed": list.filter { store.status($0, today) == .ok },
-        ]
+        // Grouped by where you usually buy each thing.
+        let byShop = Dictionary(grouping: list) { Pantry.lastShop(store.entries($0.id)) }
+        let shops = shopOrder(Array(byShop.keys))
+        let tickedNow = list.filter { ticked.contains($0.id) }
         let estimate = list.reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id), packSize: $1.packSize) ?? 0) }
         let hidden = store.items.filter { $0.hiddenFromList && store.status($0, today) != .ok }
 
@@ -54,7 +54,8 @@ struct ShoppingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
                 } else {
-                    Text("\(list.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : ""))
+                    Text("\(list.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : "")
+                         + (list.isEmpty ? "" : ". Tick what you bought, then tap Done shopping."))
                         .font(.subheadline).foregroundColor(.secondary)
                 }
 
@@ -74,11 +75,13 @@ struct ShoppingView: View {
                     }
                 }
 
-                ForEach(titles.filter { !(byTitle[$0] ?? []).isEmpty }, id: \.self) { title in
-                    Section(title) {
-                        ForEach((byTitle[title] ?? []).sorted { $0.name.lowercased() < $1.name.lowercased() }) { item in
-                            row(item)
-                        }
+                ForEach(shops, id: \.self) { shop in
+                    let rows = (byShop[shop] ?? []).sorted { a, b in
+                        let sa = store.status(a, today).rawValue, sb = store.status(b, today).rawValue
+                        return sa != sb ? sa < sb : a.name.lowercased() < b.name.lowercased()
+                    }
+                    Section(shop.isEmpty ? "🛒  Anywhere · \(rows.count)" : "🏪  \(shop) · \(rows.count)") {
+                        ForEach(rows) { item in row(item) }
                     }
                 }
 
@@ -87,6 +90,28 @@ struct ShoppingView: View {
                 }
             }
             .navigationTitle("Shopping list")
+            .toolbar {
+                if !list.isEmpty || !store.notes.isEmpty {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        ShareLink(item: shoppingText(store, today)) { Image(systemName: "square.and.arrow.up") }
+                            .accessibilityLabel("Share list")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !tickedNow.isEmpty {
+                    Button {
+                        let items = tickedNow
+                        ticked.removeAll()
+                        if let result = store.doneShopping(items) { showUndo($undo, result.0, result.1) }
+                    } label: {
+                        Label("Done shopping · \(tickedNow.count)", systemImage: "checkmark").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .padding()
+                }
+            }
             .navigationDestination(for: Int64.self) { id in ItemView(id: id, today: today) }
             .sheet(item: $buying) { target in PurchaseView(target: target, today: today) }
             .undoOverlay($undo)
@@ -100,11 +125,20 @@ struct ShoppingView: View {
         let last = Pantry.lastPriced(entries)
         let shop = last?.shop.isEmpty == false ? last!.shop : (Pantry.lastBought(entries)?.shop ?? "")
         let status = store.status(item, today)
+        _ = shop
         let line = "Usually \(unit.label(Pantry.buyAmount(unit, entries, packSize: item.packSize)))"
             + (expected.map { " · \(Money.format($0, store.currency))" } ?? "")
-            + (shop.isEmpty ? "" : " at \(shop)")
+        let isTicked = ticked.contains(item.id)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
+                Button {
+                    if isTicked { ticked.remove(item.id) } else { ticked.insert(item.id) }
+                } label: {
+                    Image(systemName: isTicked ? "checkmark.circle.fill" : "circle").font(.title2)
+                        .foregroundColor(isTicked ? .accentColor : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(isTicked ? "Ticked" : "Tick")
                 ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 46)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(item.name).font(.headline).lineLimit(1)
@@ -159,6 +193,8 @@ struct WeekView: View {
         let week = Pantry.week(start, byItem, categoryOf: categoryOf)
         let previous = Pantry.week(start.plusDays(-7), byItem, categoryOf: categoryOf)
         let diff = week.spentMinor - previous.spentMinor
+        let bought = week.items.filter { $0.bought > 0 }.sorted { (store.item($0.itemId)?.name.lowercased() ?? "") < (store.item($1.itemId)?.name.lowercased() ?? "") }
+        let used = week.items.filter { $0.used > 0 }
 
         NavigationStack(path: $path) {
             List {
@@ -174,17 +210,15 @@ struct WeekView: View {
 
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Spent").font(.subheadline).foregroundColor(.secondary)
-                        Text(Money.format(week.spentMinor, store.currency)).font(.system(size: 34, weight: .semibold, design: .rounded))
-                        if week.spentMinor > 0 || previous.spentMinor > 0 {
-                            Text(diff > 0 ? "\(Money.format(diff, store.currency)) more than the week before"
-                                 : diff < 0 ? "\(Money.format(-diff, store.currency)) less than the week before" : "Same as the week before")
-                                .font(.caption).foregroundColor(.secondary)
-                        }
+                        Text(offset == 0 ? "New this week" : "That week").font(.subheadline).foregroundColor(.secondary)
+                        Text(week.itemsBought == 0 && week.itemsUsed == 0 ? "Nothing logged yet"
+                             : week.itemsBought == 0 ? "\(week.itemsUsed) item\(week.itemsUsed == 1 ? "" : "s") used"
+                             : "\(week.itemsBought) thing\(week.itemsBought == 1 ? "" : "s") bought")
+                            .font(.title3.weight(.semibold))
                         HStack(spacing: 8) {
-                            StatTile(value: "\(week.itemsUsed)", label: "items used")
+                            StatTile(value: "\(week.itemsBought)", label: "bought")
+                            StatTile(value: "\(week.itemsUsed)", label: "used")
                             StatTile(value: "\(week.timesShared)", label: "times shared")
-                            StatTile(value: "\(week.itemsBought)", label: "items bought")
                         }
                         .padding(.top, 8)
                     }
@@ -192,8 +226,55 @@ struct WeekView: View {
                     .listRowBackground(Color(rgb: 0x2E6B3A).opacity(0.12))
                 }
 
-                if !week.spentByCategory.isEmpty {
-                    Section("Spent by category") {
+                if week.items.isEmpty {
+                    Text("Nothing used or bought this week. Tap − or 🍳 Cook a meal when you use something, and it shows up here.")
+                        .foregroundColor(.secondary)
+                }
+                if !bought.isEmpty {
+                    Section("Bought") {
+                        ForEach(bought, id: \.itemId) { w in
+                            if let item = store.item(w.itemId) {
+                                weekRow(item, "Bought \(item.unitValue.label(w.bought))", store.showSpending && w.spentMinor > 0 ? Money.format(w.spentMinor, store.currency) : nil)
+                            }
+                        }
+                    }
+                }
+                if !used.isEmpty {
+                    Section("Used") {
+                        ForEach(used, id: \.itemId) { w in
+                            if let item = store.item(w.itemId) {
+                                let unit = item.unitValue
+                                weekRow(item, "Used \(unit.label(w.used))" + (w.shared > 0 ? " (\(unit.label(w.shared)) shared)" : ""), nil)
+                            }
+                        }
+                    }
+                }
+
+                // Money stays out of the way until you ask for it.
+                Section {
+                    Button(store.showSpending ? "Hide spending" : "Show spending") { store.showSpending.toggle() }
+                        .frame(maxWidth: .infinity)
+                }
+                if store.showSpending {
+                    Section("Spent") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(Money.format(week.spentMinor, store.currency)).font(.system(size: 30, weight: .semibold, design: .rounded))
+                            if week.spentMinor > 0 || previous.spentMinor > 0 {
+                                Text(diff > 0 ? "\(Money.format(diff, store.currency)) more than the week before"
+                                     : diff < 0 ? "\(Money.format(-diff, store.currency)) less than the week before" : "Same as the week before")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                        if store.budgetMinor > 0 {
+                            let month = Pantry.spentBetween(byItem, today.firstOfMonth, today)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("This month: \(Money.format(month, store.currency)) of \(Money.format(store.budgetMinor, store.currency))").fontWeight(.medium)
+                                ProgressView(value: min(Double(month), Double(store.budgetMinor)), total: Double(store.budgetMinor))
+                                Text(month <= store.budgetMinor ? "\(Money.format(store.budgetMinor - month, store.currency)) left this month"
+                                     : "\(Money.format(month - store.budgetMinor, store.currency)) over this month")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                        }
                         let maxValue = week.spentByCategory.values.max() ?? 1
                         ForEach(week.spentByCategory.keys.sorted { (week.spentByCategory[$0] ?? 0) > (week.spentByCategory[$1] ?? 0) }, id: \.self) { category in
                             let minor = week.spentByCategory[category] ?? 0
@@ -209,36 +290,24 @@ struct WeekView: View {
                         }
                     }
                 }
-
-                Section("Items") {
-                    if week.items.isEmpty {
-                        Text("Nothing used or bought this week.").foregroundColor(.secondary)
-                    }
-                    ForEach(week.items, id: \.itemId) { w in
-                        if let item = store.item(w.itemId) {
-                            let unit = item.unitValue
-                            let parts = [
-                                w.used > 0 ? "used \(unit.label(w.used))" + (w.shared > 0 ? " (\(Qty.format(w.shared)) shared)" : "") : "",
-                                w.bought > 0 ? "bought \(unit.label(w.bought))" : "",
-                            ].filter { !$0.isEmpty }.joined(separator: " · ")
-                            HStack(spacing: 12) {
-                                ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 40)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.name).font(.subheadline.weight(.semibold))
-                                    Text(parts.prefix(1).uppercased() + String(parts.dropFirst())).font(.caption).foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if w.spentMinor > 0 { Text(Money.format(w.spentMinor, store.currency)).font(.subheadline.weight(.medium)) }
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture { path.append(item.id) }
-                        }
-                    }
-                }
             }
             .navigationTitle(offset == 0 ? "This week" : "Weekly")
             .navigationDestination(for: Int64.self) { id in ItemView(id: id, today: today) }
         }
+    }
+
+    private func weekRow(_ item: Item, _ text: String, _ money: String?) -> some View {
+        HStack(spacing: 12) {
+            ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name).font(.subheadline.weight(.semibold))
+                Text(text).font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            if let money = money { Text(money).font(.subheadline.weight(.medium)) }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { path.append(item.id) }
     }
 }
 
@@ -248,6 +317,7 @@ struct SettingsView: View {
     @State private var importing = false
     @State private var exportURL: URL?
     @State private var message: String?
+    @State private var budgetText = ""
 
     var body: some View {
         NavigationStack {
@@ -261,6 +331,22 @@ struct SettingsView: View {
                     Text("Currency")
                 } footer: {
                     Text("Changing it doesn't convert amounts you've already entered.")
+                }
+
+                Section {
+                    Toggle("Show spending on Weekly", isOn: $store.showSpending)
+                    HStack {
+                        TextField("Monthly budget (optional)", text: $budgetText).keyboardType(.decimalPad)
+                        Button("Save") {
+                            store.budgetMinor = budgetText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : (Money.parseToMinor(budgetText) ?? store.budgetMinor)
+                            budgetText = store.budgetMinor > 0 ? Money.minorToInput(store.budgetMinor) : ""
+                        }
+                        .disabled(!budgetText.trimmingCharacters(in: .whitespaces).isEmpty && Money.parseToMinor(budgetText) == nil)
+                    }
+                } header: {
+                    Text("Spending")
+                } footer: {
+                    Text("Off keeps money out of sight until you tap Show spending. The budget only shows there. Leave it empty to turn it off.")
                 }
 
                 Section {
@@ -286,7 +372,10 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-            .onAppear { exportURL = try? store.exportFile() }
+            .onAppear {
+                exportURL = try? store.exportFile()
+                budgetText = store.budgetMinor > 0 ? Money.minorToInput(store.budgetMinor) : ""
+            }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json, .plainText, .data]) { result in
                 switch result {
                 case .success(let url):

@@ -134,17 +134,6 @@ fun StockPill(text: String, status: StockStatus, onClick: (() -> Unit)? = null) 
     )
 }
 
-/** Text colour for an "almost out" or "last meal" line. */
-@Composable
-fun statusColor(status: StockStatus): Color {
-    val dark = isSystemInDarkTheme()
-    return when (status) {
-        StockStatus.OUT, StockStatus.LAST -> MaterialTheme.colorScheme.error
-        StockStatus.LOW -> if (dark) Color(0xFFFFC870) else Color(0xFF8A5300)
-        StockStatus.OK -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-}
-
 /** A number with a label underneath, for summary cards. */
 @Composable
 fun StatTile(value: String, label: String, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
@@ -159,7 +148,7 @@ fun StatTile(value: String, label: String, modifier: Modifier = Modifier, onClic
 
 @Composable
 fun statusColor(status: StockStatus): Color = when (status) {
-    StockStatus.OUT -> MaterialTheme.colorScheme.error
+    StockStatus.OUT, StockStatus.LAST -> MaterialTheme.colorScheme.error
     StockStatus.LOW -> if (isSystemInDarkTheme()) Color(0xFFF4BC6B) else Color(0xFF9A5B00)
     StockStatus.OK -> MaterialTheme.colorScheme.onSurfaceVariant
 }

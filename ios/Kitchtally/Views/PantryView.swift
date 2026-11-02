@@ -9,6 +9,7 @@ struct PantryView: View {
     @State private var search = ""
     @State private var adding = false
     @State private var showSettings = false
+    @State private var cooking = false
     @State private var undo: UndoState?
     @State private var path: [Int64] = []
 
@@ -79,6 +80,9 @@ struct PantryView: View {
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $cooking) {
+                CookSheet { message, action in showUndo($undo, message, action) }
+            }
             .undoOverlay($undo)
         }
     }
@@ -86,17 +90,24 @@ struct PantryView: View {
     private var summary: some View {
         let week = Pantry.week(Pantry.weekStart(today), store.entriesByItem) { id in store.item(id)?.category ?? "" }
         let toBuy = store.items.filter { store.onShoppingList($0, today) }.count + store.notes.count
+        let almostOut = store.items.filter { !$0.unsure && store.stock($0.id) > 0 && store.status($0, today) != .ok }.count
         return Section {
             VStack(alignment: .leading, spacing: 4) {
                 Text("This week").font(.subheadline).foregroundColor(.secondary)
-                Text(Money.format(week.spentMinor, store.currency)).font(.system(size: 34, weight: .semibold, design: .rounded))
-                Text("spent on groceries and more").font(.caption).foregroundColor(.secondary)
+                Text(almostOut == 1 ? "1 thing is almost out" : almostOut > 1 ? "\(almostOut) things are almost out" : "Your pantry is stocked")
+                    .font(.title3.weight(.semibold))
                 HStack(spacing: 8) {
                     StatTile(value: "\(week.itemsUsed)", label: "items used").onTapGesture { tab = 2 }
-                    StatTile(value: "\(week.timesShared)", label: "times shared").onTapGesture { tab = 2 }
+                    StatTile(value: "\(week.itemsBought)", label: "bought new").onTapGesture { tab = 2 }
                     StatTile(value: "\(toBuy)", label: "to buy").onTapGesture { tab = 1 }
                 }
                 .padding(.top, 8)
+                Button { cooking = true } label: {
+                    Text("🍳  Cook a meal").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 8)
+                .disabled(store.items.isEmpty)
             }
             .padding(.vertical, 6)
             .listRowBackground(Color(rgb: 0x2E6B3A).opacity(0.12))
@@ -122,7 +133,10 @@ struct ItemRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name).font(.headline).lineLimit(1)
                     StockPill(text: stockLabel(item, stock) + (item.refillNeeded && status == .ok ? " · refill" : "") + "  ±", status: status) { adjusting = true }
-                    Text(detailLine(item, store, today)).font(.caption).foregroundColor(.secondary).lineLimit(1)
+                    let alert = stock > 0 && status != .ok
+                    Text(detailLine(item, store, today)).font(.caption)
+                        .fontWeight(alert ? .medium : .regular)
+                        .foregroundColor(alert ? statusColor(status) : .secondary).lineLimit(2)
                 }
                 Spacer(minLength: 4)
             }
@@ -155,5 +169,68 @@ struct ItemRow: View {
         .sheet(isPresented: $adjusting) {
             AdjustSheet(item: item) { message, action in showUndo($undo, "\(message) of \(item.name)", action) }
         }
+    }
+}
+
+/// Cook a meal: tick what goes in; one meal comes off each (or one tap for things like oil).
+struct CookSheet: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let onDone: (String, @escaping () -> Void) -> Void
+    @State private var chosen = Set<Int64>()
+    @State private var search = ""
+
+    var body: some View {
+        let available = store.items.filter { store.stock($0.id) > 0 }.sorted { a, b in
+            let am = a.countMeals && a.mealsPerUnit > 0, bm = b.countMeals && b.mealsPerUnit > 0
+            return am != bm ? am : a.name.lowercased() < b.name.lowercased()
+        }
+        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let shown = available.filter { query.isEmpty || $0.name.lowercased().contains(query) || chosen.contains($0.id) }
+        NavigationStack {
+            List {
+                if available.isEmpty {
+                    Text("Nothing in the pantry yet. Tap + on what you have first.").foregroundColor(.secondary)
+                } else {
+                    Section(footer: Text("Each one goes down by one meal, or by one tap for things like oil.")) {
+                        ForEach(shown) { item in
+                            let stock = store.stock(item.id)
+                            let amount = Meals.cookAmount(item.step, item.countMeals ? item.mealsPerUnit : 0)
+                            Button {
+                                if chosen.contains(item.id) { chosen.remove(item.id) } else { chosen.insert(item.id) }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: chosen.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundColor(chosen.contains(item.id) ? .accentColor : .secondary)
+                                    ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 34)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.name).foregroundColor(.primary)
+                                        Text(([stockLabel(item, stock), mealsText(item, stock), "uses \(item.unitValue.label(min(amount, stock)))"].compactMap { $0 }).joined(separator: " · "))
+                                            .font(.caption).foregroundColor(.secondary).lineLimit(1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .searchable(text: $search, prompt: "Search")
+            .navigationTitle("🍳 Cook a meal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button("With friends") { finish(shared: true) }.disabled(chosen.isEmpty)
+                    Spacer()
+                    Button("Cooked") { finish(shared: false) }.buttonStyle(.borderedProminent).disabled(chosen.isEmpty)
+                }
+            }
+        }
+    }
+
+    private func finish(shared: Bool) {
+        let items = store.items.filter { chosen.contains($0.id) }
+        if let result = store.cook(items, shared: shared) { onDone(result.0, result.1) }
+        dismiss()
     }
 }

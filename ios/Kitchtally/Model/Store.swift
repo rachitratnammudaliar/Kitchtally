@@ -20,8 +20,18 @@ struct Item: Identifiable, Equatable {
     var packSize: Double = 0
     /// Not sure whether to buy it again: never on the shopping list until switched off.
     var unsure: Bool = false
+    /// Show how many meals are left. Off for salt, oil and the like.
+    var countMeals: Bool = false
+    /// Meals one unit makes (one full packet for % items). 0 until set.
+    var mealsPerUnit: Double = 0
+    /// lowAt is counted in meals.
+    var lowInMeals: Bool = false
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
+    var counting: Counting {
+        let meals = countMeals ? mealsPerUnit : 0
+        return Counting(unit: unitValue, lowAt: lowAt, mealsPerUnit: meals, lowInMeals: lowInMeals && meals > 0)
+    }
     var lifeValue: Life { Life.from(life) }
 }
 
@@ -74,6 +84,7 @@ enum Backup {
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
                 "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
+                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -87,7 +98,7 @@ enum Backup {
             return o
         }
         let notesJson: [[String: Any]] = notes.map { ["text": $0.text, "createdAt": $0.createdAt] }
-        let root: [String: Any] = ["format": format, "version": 3, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
+        let root: [String: Any] = ["format": format, "version": 4, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -128,7 +139,10 @@ enum Backup {
                 step: min(step, 10_000),
                 hiddenFromList: (o["hiddenFromList"] as? Bool) ?? false,
                 packSize: max(0, min(number(o, "packSize")?.doubleValue ?? 0, 10_000)),
-                unsure: (o["unsure"] as? Bool) ?? false
+                unsure: (o["unsure"] as? Bool) ?? false,
+                countMeals: (o["countMeals"] as? Bool) ?? false,
+                mealsPerUnit: max(0, min(number(o, "mealsPerUnit")?.doubleValue.nanToZero ?? 0, 10_000)),
+                lowInMeals: (o["lowInMeals"] as? Bool) ?? false
             ))
         }
         let refs = Set(items.map(\.id))
@@ -161,6 +175,10 @@ enum Backup {
         }
         return (items, events, notes)
     }
+}
+
+private extension Double {
+    var nanToZero: Double { isNaN ? 0 : self }
 }
 
 /// Photos are resized and kept in the app's private storage.
@@ -228,6 +246,14 @@ final class Store: ObservableObject {
     @Published var currency: String {
         didSet { UserDefaults.standard.set(currency, forKey: "currency") }
     }
+    /// Money on the Weekly tab stays hidden until asked for.
+    @Published var showSpending: Bool {
+        didSet { UserDefaults.standard.set(showSpending, forKey: "show_spending") }
+    }
+    /// Monthly budget in cents; 0 means off.
+    @Published var budgetMinor: Int64 {
+        didSet { UserDefaults.standard.set(budgetMinor, forKey: "budget_minor") }
+    }
 
     private let fileURL: URL
     private var nextEventId: Int64 = 1
@@ -239,6 +265,8 @@ final class Store: ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("pantry.json")
         currency = UserDefaults.standard.string(forKey: "currency") ?? "EUR"
+        showSpending = UserDefaults.standard.bool(forKey: "show_spending")
+        budgetMinor = Int64(max(0, UserDefaults.standard.integer(forKey: "budget_minor")))
         load()
     }
 
@@ -254,7 +282,7 @@ final class Store: ObservableObject {
     var usedShops: [String] { events.sorted { $0.createdAt > $1.createdAt }.map(\.shop).filter { !$0.isEmpty } }
     var usedCategories: [String] { items.map(\.category) }
 
-    func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), lowAt: item.lowAt, today) }
+    func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), item.counting, today) }
     /// On the list when marked, out or running low, unless hidden until it's bought again.
     func onShoppingList(_ item: Item, _ today: Day) -> Bool {
         !item.unsure && (item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok))
@@ -498,6 +526,44 @@ final class Store: ObservableObject {
     func deleteEvent(_ id: Int64) {
         if let e = events.first(where: { $0.id == id }) { PhotoStore.delete(e.receiptFile) }
         events.removeAll { $0.id == id }
+        persist()
+    }
+
+    /// Cook: one meal from each item (or one tap for things like oil), logged and undone together.
+    func cook(_ chosen: [Item], shared: Bool) -> (String, () -> Void)? {
+        var ids: [Int64] = []
+        for item in chosen {
+            let amount = Pantry.useAmount(Meals.cookAmount(item.step, item.countMeals ? item.mealsPerUnit : 0), stock(item.id))
+            guard amount > 0 else { continue }
+            appendEvent(Event(itemId: item.id, type: (shared ? EventType.SHARED : .USED).rawValue, epochDay: Day.today().epochDay, quantity: amount, note: "Cooked"))
+            ids.append(nextEventId - 1)
+        }
+        guard !ids.isEmpty else { return nil }
+        persist()
+        let gone = Set(ids)
+        return ("Cooked with \(chosen.map(\.name).joined(separator: ", "))", {
+            self.events.removeAll { gone.contains($0.id) }
+            self.persist()
+        })
+    }
+
+    /// Done shopping: everything ticked bought at once, at last time's amount, shop and price.
+    func doneShopping(_ chosen: [Item]) -> (String, () -> Void)? {
+        guard !chosen.isEmpty else { return nil }
+        let buys = chosen.map { quickBuy($0) }
+        return ("Bought \(buys.count) item\(buys.count == 1 ? "" : "s")", { buys.forEach { self.undoBuy($0) } })
+    }
+
+    /// From the purchase screen: "these make about 8 meals".
+    func setMealsPerUnit(_ id: Int64, _ mealsPerUnit: Double) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id {
+                copy.countMeals = true
+                copy.mealsPerUnit = mealsPerUnit
+            }
+            return copy
+        }
         persist()
     }
 
