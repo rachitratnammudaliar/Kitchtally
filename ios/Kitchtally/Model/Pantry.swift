@@ -206,8 +206,7 @@ struct Suggestion: Equatable {
 enum Suggestions {
     // Checked in order, so more specific names come first.
     private static let rules: [([String], Suggestion)] = [
-        ([
-        listOf("ice cream"], Suggestion(category: "Snacks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["ice cream"], Suggestion(category: "Snacks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach"], Suggestion(category: "Household", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
