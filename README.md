@@ -2,6 +2,8 @@
 
 **An offline pantry tracker for Android and iPhone. Know what's at home, what's almost out, and how many meals you can still cook.**
 
+🌐 **[rachitratnammudaliar.github.io/Kitchtally](https://rachitratnammudaliar.github.io/Kitchtally/)**
+
 Rice, atta, bread, onions, shampoo: add the things you keep at home, tap **＋** when you buy more, **−** when you use some, and **Shared** when you cook for friends. Kitchtally counts what's left, warns you before it runs out, builds your shopping list and shows a weekly summary. Your data never leaves your phone: no internet, no account, no ads and no tracking.
 
 <p>
