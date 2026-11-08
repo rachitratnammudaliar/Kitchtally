@@ -172,6 +172,10 @@ interface PantryDao {
     @Query("DELETE FROM events WHERE id = :id")
     suspend fun deleteEvent(id: Long)
 
+    /** Moves purchases to count from [day] on the Weekly tab, or back to the day they happened (null). */
+    @Query("UPDATE events SET countsFromDay = :day WHERE id IN (:ids)")
+    suspend fun setCountsFrom(ids: List<Long>, day: Long?)
+
     /** After buying: off the manual list, and shown again if it was hidden. */
     @Query("UPDATE items SET refillNeeded = 0, hiddenFromList = 0 WHERE id = :id")
     suspend fun clearRefill(id: Long)

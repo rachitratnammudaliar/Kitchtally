@@ -410,6 +410,28 @@ final class Store: ObservableObject {
         events.append(copy)
     }
 
+    /// Today's purchases that still count in this week.
+    func todaysPurchases(_ today: Day) -> [Int64] {
+        events.filter { $0.typeValue == .BOUGHT && $0.epochDay == today.epochDay && $0.countsFromDay == nil }.map(\.id)
+    }
+
+    /// Makes today's purchases count in next week. Returns their ids, for Undo.
+    @discardableResult
+    func moveTodaysPurchasesToNextWeek(_ today: Day) -> [Int64] {
+        let ids = Set(todaysPurchases(today))
+        guard !ids.isEmpty else { return [] }
+        let next = Pantry.weekStart(today, first: weekStartDay).plusDays(7).epochDay
+        events = events.map { e in var c = e; if ids.contains(e.id) { c.countsFromDay = next }; return c }
+        persist()
+        return Array(ids)
+    }
+
+    func countOnTheDay(_ ids: [Int64]) {
+        let set = Set(ids)
+        events = events.map { e in var c = e; if set.contains(e.id) { c.countsFromDay = nil }; return c }
+        persist()
+    }
+
     func isForNextWeek(_ today: Day) -> Bool { forNextWeekUntil > today.epochDay }
 
     func setForNextWeek(_ on: Bool) {

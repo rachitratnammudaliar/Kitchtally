@@ -774,6 +774,7 @@ private fun SectionTitle(text: String) {
 @Composable
 private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDate, currency: String, onOpen: (Long) -> Unit, modifier: Modifier) {
     var offset by rememberSaveable { mutableLongStateOf(0L) }
+    var moved by remember { mutableStateOf(emptyList<Long>()) }
     val showSpending by vm.showSpending.collectAsStateWithLifecycle()
     val budget by vm.budgetMinor.collectAsStateWithLifecycle()
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
@@ -799,6 +800,24 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = { offset-- }, enabled = offset > 0) { Text("Later ›") }
+            }
+        }
+        val todays = vm.todaysPurchases(state, today).size
+        if (offset == 0L && (todays > 0 || moved.isNotEmpty())) {
+            item(key = "moveToday") {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (moved.isNotEmpty()) {
+                            Text("Moved ${moved.size} purchase${if (moved.size == 1) "" else "s"} to next week. They now count there.", style = MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick = { vm.countOnTheDay(moved); moved = emptyList() }) { Text("Undo") }
+                        } else {
+                            Text("Bought $todays thing${if (todays == 1) "" else "s"} today for next week?", style = MaterialTheme.typography.bodyMedium)
+                            FilledTonalButton(onClick = { vm.moveTodaysPurchasesToNextWeek(state, today) { moved = it } }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Count today's shop in next week")
+                            }
+                        }
+                    }
+                }
             }
         }
         item(key = "totals") {

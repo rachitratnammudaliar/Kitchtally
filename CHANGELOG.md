@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.2
+
+**New**
+- **Count today's shop in next week:** one button on Weekly moves everything you bought today to next week, with Undo
+
 ## 1.4.1
 
 **Fixed**

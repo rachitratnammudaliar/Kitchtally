@@ -107,6 +107,25 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _forNextWeekUntil.value = until
     }
 
+    /** Today's purchases that still count in this week. */
+    fun todaysPurchases(state: PantryState, today: LocalDate): List<Long> =
+        state.events.filter { it.type == EventType.BOUGHT.name && it.epochDay == today.toEpochDay() && it.countsFromDay == null }.map { it.id }
+
+    /** Makes the purchases logged today count in next week. [onMoved] gets their ids, for Undo. */
+    fun moveTodaysPurchasesToNextWeek(state: PantryState, today: LocalDate, onMoved: (List<Long>) -> Unit) {
+        val ids = todaysPurchases(state, today)
+        if (ids.isEmpty()) return
+        val next = Pantry.weekStart(today, DayOfWeek.of(prefs.weekStartDay)).plusWeeks(1).toEpochDay()
+        viewModelScope.launch {
+            dao.setCountsFrom(ids, next)
+            onMoved(ids)
+        }
+    }
+
+    fun countOnTheDay(ids: List<Long>) {
+        viewModelScope.launch { dao.setCountsFrom(ids, null) }
+    }
+
     /** Where a purchase made right now should start counting, or null for this week. */
     private fun buyCountsFrom(): Long? = prefs.forNextWeekUntil.takeIf { it > LocalDate.now().toEpochDay() }
 

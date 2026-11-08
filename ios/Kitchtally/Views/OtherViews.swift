@@ -186,9 +186,11 @@ struct WeekView: View {
     let today: Day
     @State private var offset = 0
     @State private var path: [Int64] = []
+    @State private var moved: [Int64] = []
 
     var body: some View {
         let start = Pantry.weekStart(today, first: store.weekStartDay).plusDays(-7 * offset)
+        let todays = store.todaysPurchases(today).count
         let byItem = store.entriesByItem
         let categoryOf: (Int64) -> String = { id in store.item(id)?.category ?? "Other" }
         let week = Pantry.week(start, byItem, categoryOf: categoryOf)
@@ -206,6 +208,19 @@ struct WeekView: View {
                         Text("\(start.format(.short)) – \(start.plusDays(6).format(.short))").font(.headline)
                         Spacer()
                         Button { offset -= 1 } label: { Image(systemName: "chevron.right") }.buttonStyle(.borderless).disabled(offset == 0)
+                    }
+                }
+
+                if offset == 0 && (todays > 0 || !moved.isEmpty) {
+                    Section {
+                        if moved.isEmpty {
+                            Text("Bought \(todays) thing\(todays == 1 ? "" : "s") today for next week?").font(.subheadline)
+                            Button("Count today's shop in next week") { moved = store.moveTodaysPurchasesToNextWeek(today) }
+                                .buttonStyle(.borderedProminent)
+                        } else {
+                            Text("Moved \(moved.count) purchase\(moved.count == 1 ? "" : "s") to next week. They now count there.").font(.subheadline)
+                            Button("Undo") { store.countOnTheDay(moved); moved = [] }
+                        }
                     }
                 }
 
