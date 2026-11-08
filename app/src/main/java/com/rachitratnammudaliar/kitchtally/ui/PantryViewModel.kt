@@ -21,6 +21,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
