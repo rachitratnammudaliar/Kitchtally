@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.6.1
+(1.6.0 was published by mistake without the new code; 1.6.1 is the real one.)
+
 ## 1.6.0
 
 **New**
