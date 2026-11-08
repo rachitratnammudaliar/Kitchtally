@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+**New**
+- **Budget tab:** spending month by month, with everyday shopping and long-lasting things apart. Your monthly budget applies to everyday shopping
+- **Long-lasting things** (Personal care and Household: face cream, toilet paper, shower gel) are no longer part of the weekly shop. Weekly lists them in their own section, and Budget shows what they cost each month and what you bought
+
 ## 1.4.2
 
 **New**

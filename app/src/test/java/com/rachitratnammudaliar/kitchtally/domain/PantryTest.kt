@@ -109,6 +109,27 @@ class PantryTest {
     }
 
     @Test
+    fun longLastingThingsAreKeptOutOfTheWeeklyShop() {
+        val start = Pantry.weekStart(today)
+        val cream = listOf(Entry(EventType.BOUGHT, start.plusDays(1), 1.0, 1200, "Maxima"))
+        val milk = listOf(Entry(EventType.BOUGHT, start.plusDays(1), 1.0, 85, "IKI"), Entry(EventType.USED, start.plusDays(2), 0.5))
+        val items = mapOf(1L to cream, 2L to milk)
+        val week = Pantry.week(start, items, isLong = { it == 1L }, categoryOf = { "Other" })
+        assertEquals(85L, week.spentMinor)
+        assertEquals(1, week.itemsBought)
+        assertEquals(1, week.longItems.size)
+        assertEquals(1200L, week.longSpentMinor)
+        val m = Pantry.month(start.withDayOfMonth(1), items, isLong = { it == 1L }, categoryOf = { if (it == 1L) "Personal care" else "Dairy & eggs" })
+        assertEquals(85L, m.everydayMinor)
+        assertEquals(1200L, m.longMinor)
+        assertEquals(1200L, m.longByCategory["Personal care"])
+        assertEquals(1, m.longBuys.size)
+        assertTrue(Categories.isLongLasting("Personal care"))
+        assertTrue(Categories.isLongLasting("household"))
+        assertFalse(Categories.isLongLasting("Staples"))
+    }
+
+    @Test
     fun weekCanStartOnAnotherDay() {
         assertEquals(LocalDate.of(2026, 11, 1), Pantry.weekStart(today, java.time.DayOfWeek.SUNDAY))
         assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(today))

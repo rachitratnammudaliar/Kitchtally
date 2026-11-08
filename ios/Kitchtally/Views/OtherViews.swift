@@ -193,8 +193,8 @@ struct WeekView: View {
         let todays = store.todaysPurchases(today).count
         let byItem = store.entriesByItem
         let categoryOf: (Int64) -> String = { id in store.item(id)?.category ?? "Other" }
-        let week = Pantry.week(start, byItem, categoryOf: categoryOf)
-        let previous = Pantry.week(start.plusDays(-7), byItem, categoryOf: categoryOf)
+        let week = Pantry.week(start, byItem, categoryOf: categoryOf, isLong: { store.isLong($0) })
+        let previous = Pantry.week(start.plusDays(-7), byItem, categoryOf: categoryOf, isLong: { store.isLong($0) })
         let diff = week.spentMinor - previous.spentMinor
         let bought = week.items.filter { $0.bought > 0 }.sorted { (store.item($0.itemId)?.name.lowercased() ?? "") < (store.item($1.itemId)?.name.lowercased() ?? "") }
         let used = week.items.filter { $0.used > 0 }
@@ -227,7 +227,8 @@ struct WeekView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(offset == 0 ? "New this week" : "That week").font(.subheadline).foregroundColor(.secondary)
-                        Text(week.itemsBought == 0 && week.itemsUsed == 0 ? "Nothing logged yet"
+                        Text(week.itemsBought == 0 && week.itemsUsed == 0 && !week.longItems.isEmpty ? "\(week.longItems.count) long-lasting thing\(week.longItems.count == 1 ? "" : "s") bought"
+                             : week.itemsBought == 0 && week.itemsUsed == 0 ? "Nothing logged yet"
                              : week.itemsBought == 0 ? "\(week.itemsUsed) item\(week.itemsUsed == 1 ? "" : "s") used"
                              : "\(week.itemsBought) thing\(week.itemsBought == 1 ? "" : "s") bought")
                             .font(.title3.weight(.semibold))
@@ -242,7 +243,7 @@ struct WeekView: View {
                     .listRowBackground(Color(rgb: 0x2E6B3A).opacity(0.12))
                 }
 
-                if week.items.isEmpty {
+                if week.items.isEmpty && week.longItems.isEmpty {
                     Text("Nothing used or bought this week. Tap − or 🍳 Cook a meal when you use something, and it shows up here.")
                         .foregroundColor(.secondary)
                 }
@@ -266,6 +267,20 @@ struct WeekView: View {
                     }
                 }
 
+                if !week.longItems.isEmpty {
+                    Section {
+                        ForEach(week.longItems, id: \.itemId) { w in
+                            if let item = store.item(w.itemId) {
+                                weekRow(item, "Bought \(item.unitValue.label(w.bought))", store.showSpending && w.spentMinor > 0 ? Money.format(w.spentMinor, store.currency) : nil)
+                            }
+                        }
+                    } header: {
+                        Text("Long-lasting · counted in Budget")
+                    } footer: {
+                        Text("Face cream, toilet paper, shower gel and other non-food things last a month or more, so they're not in this week's totals. See the Budget tab.")
+                    }
+                }
+
                 // Money stays out of the way until you ask for it.
                 Section {
                     Button(store.showSpending ? "Hide spending" : "Show spending") { store.showSpending.toggle() }
@@ -282,7 +297,7 @@ struct WeekView: View {
                             }
                         }
                         if store.budgetMinor > 0 {
-                            let month = Pantry.spentBetween(byItem, today.firstOfMonth, today)
+                            let month = Pantry.spentBetween(byItem.filter { !store.isLong($0.key) }, today.firstOfMonth, today)
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("This month: \(Money.format(month, store.currency)) of \(Money.format(store.budgetMinor, store.currency))").fontWeight(.medium)
                                 ProgressView(value: min(Double(month), Double(store.budgetMinor)), total: Double(store.budgetMinor))
@@ -312,7 +327,7 @@ struct WeekView: View {
         }
     }
 
-    private func weekRow(_ item: Item, _ text: String, _ money: String?) -> some View {
+    func weekRow(_ item: Item, _ text: String, _ money: String?) -> some View {
         HStack(spacing: 12) {
             ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 40)
             VStack(alignment: .leading, spacing: 2) {

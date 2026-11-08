@@ -173,6 +173,11 @@ enum Categories {
         "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
     ]
 
+    /// Things that last a month or more and aren't food: counted in Budget, not in the weekly shop.
+    static func isLongLasting(_ category: String) -> Bool {
+        ["personal care", "household"].contains(category.lowercased())
+    }
+
     /// Names used before version 1.2, and what they're called now.
     static let renamed = ["Fruit & veg": "Vegetables", "Grains & flour": "Staples", "Toiletries": "Personal care", "Cleaning": "Household"]
 
@@ -487,11 +492,14 @@ enum Pantry {
         let itemsUsed: Int
         let timesShared: Int
         let itemsBought: Int
+        /// Long-lasting things bought this week (not in the numbers above).
+        var longItems: [ItemWeek] = []
+        var longSpentMinor: Int64 = 0
     }
 
-    static func week(_ start: Day, _ entriesByItem: [Int64: [Entry]], categoryOf: (Int64) -> String) -> Week {
+    static func week(_ start: Day, _ entriesByItem: [Int64: [Entry]], categoryOf: (Int64) -> String, isLong: (Int64) -> Bool = { _ in false }) -> Week {
         let end = start.plusDays(6)
-        var items: [ItemWeek] = []
+        var all: [ItemWeek] = []
         for (id, entries) in entriesByItem {
             let inWeek = entries.filter { !($0.weekDate < start) && !($0.weekDate > end) }
             if inWeek.isEmpty { continue }
@@ -506,7 +514,14 @@ enum Pantry {
                 spentMinor: boughtEntries.reduce(0) { $0 + ($1.priceMinor ?? 0) }
             )
             if w.used == 0 && w.bought == 0 { continue }
-            items.append(w)
+            all.append(w)
+        }
+        // Long-lasting things (face cream, toilet paper) are counted in Budget, not in the weekly shop.
+        let longItems = all.filter { isLong($0.itemId) && $0.bought > 0 }.sorted { $0.spentMinor > $1.spentMinor }
+        var items: [ItemWeek] = []
+        for w in all {
+            if !isLong(w.itemId) { items.append(w) }
+            else if w.used > 0 { items.append(ItemWeek(itemId: w.itemId, used: w.used, shared: w.shared, bought: 0, spentMinor: 0)) }
         }
         let timesShared = entriesByItem.values.reduce(0) { sum, entries in
             sum + entries.filter { $0.type == .SHARED && !($0.weekDate < start) && !($0.weekDate > end) }.count
@@ -523,7 +538,51 @@ enum Pantry {
             sharedTotal: Qty.round(items.reduce(0) { $0 + $1.shared }),
             itemsUsed: items.filter { $0.used > 0 }.count,
             timesShared: timesShared,
-            itemsBought: items.filter { $0.bought > 0 }.count
+            itemsBought: items.filter { $0.bought > 0 }.count,
+            longItems: longItems,
+            longSpentMinor: longItems.reduce(0) { $0 + $1.spentMinor }
+        )
+    }
+
+    struct LongBuy {
+        let itemId: Int64
+        let date: Day
+        let quantity: Double
+        let spentMinor: Int64
+    }
+
+    struct MonthSpend {
+        let everydayMinor: Int64
+        let longMinor: Int64
+        let everydayByCategory: [String: Int64]
+        let longByCategory: [String: Int64]
+        let longBuys: [LongBuy]
+    }
+
+    /// What was spent in the month that starts on [first]: everyday shopping and long-lasting things apart.
+    static func month(_ first: Day, _ entriesByItem: [Int64: [Entry]], categoryOf: (Int64) -> String, isLong: (Int64) -> Bool) -> MonthSpend {
+        let last = first.lastOfMonth
+        var everyday: Int64 = 0, long: Int64 = 0
+        var everydayBy: [String: Int64] = [:], longBy: [String: Int64] = [:]
+        var buys: [LongBuy] = []
+        for (id, entries) in entriesByItem {
+            for e in entries where e.type == .BOUGHT && !(e.weekDate < first) && !(e.weekDate > last) {
+                let cost = e.priceMinor ?? 0
+                if isLong(id) {
+                    long += cost
+                    longBy[categoryOf(id), default: 0] += cost
+                    buys.append(LongBuy(itemId: id, date: e.weekDate, quantity: e.quantity, spentMinor: cost))
+                } else {
+                    everyday += cost
+                    everydayBy[categoryOf(id), default: 0] += cost
+                }
+            }
+        }
+        return MonthSpend(
+            everydayMinor: everyday, longMinor: long,
+            everydayByCategory: everydayBy.filter { $0.value > 0 },
+            longByCategory: longBy.filter { $0.value > 0 },
+            longBuys: buys.sorted { $0.date > $1.date }
         )
     }
 

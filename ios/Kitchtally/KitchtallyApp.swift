@@ -33,6 +33,9 @@ struct RootView: View {
             WeekView(today: today)
                 .tabItem { Label("Weekly", systemImage: "chart.bar") }
                 .tag(2)
+            BudgetView(today: today)
+                .tabItem { Label("Budget", systemImage: "eurosign.circle") }
+                .tag(3)
         }
         .onReceive(timer) { _ in today = Day.today() }
         .alert("Kitchtally", isPresented: Binding(get: { store.problem != nil }, set: { if !$0 { store.problem = nil } })) {

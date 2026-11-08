@@ -20,7 +20,7 @@ import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
-import com.rachitratnammudaliar.kitchtally.domain.Life
+import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
@@ -53,6 +53,9 @@ data class PantryState(
     fun events(id: Long): List<Event> = eventsByItem[id].orEmpty()
     fun item(id: Long): Item? = items.firstOrNull { it.id == id }
     fun stock(id: Long): Double = Pantry.stock(entries(id))
+
+    /** Face cream, toilet paper, shower gel and the like are counted in Budget, not in the weekly shop. */
+    fun isLong(id: Long): Boolean = item(id)?.category?.let { Categories.isLongLasting(it) } == true
 
     /** Shop names typed before, newest first, for the shop buttons. */
     val usedShops: List<String> = events.sortedByDescending { it.createdAt }.map { it.shop }.filter { it.isNotBlank() }

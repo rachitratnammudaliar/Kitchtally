@@ -69,6 +69,26 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(Pantry.stock([forNext, usedNow]), 1)
     }
 
+    func testLongLastingThingsAreKeptOutOfTheWeeklyShop() {
+        let start = Pantry.weekStart(today)
+        let cream = [Entry(type: .BOUGHT, date: start.plusDays(1), quantity: 1, priceMinor: 1200, shop: "Maxima")]
+        let milk = [Entry(type: .BOUGHT, date: start.plusDays(1), quantity: 1, priceMinor: 85, shop: "IKI"), Entry(type: .USED, date: start.plusDays(2), quantity: 0.5)]
+        let items: [Int64: [Entry]] = [1: cream, 2: milk]
+        let week = Pantry.week(start, items, categoryOf: { _ in "Other" }, isLong: { $0 == 1 })
+        XCTAssertEqual(week.spentMinor, 85)
+        XCTAssertEqual(week.itemsBought, 1)
+        XCTAssertEqual(week.longItems.count, 1)
+        XCTAssertEqual(week.longSpentMinor, 1200)
+        let m = Pantry.month(start.firstOfMonth, items, categoryOf: { $0 == 1 ? "Personal care" : "Dairy & eggs" }, isLong: { $0 == 1 })
+        XCTAssertEqual(m.everydayMinor, 85)
+        XCTAssertEqual(m.longMinor, 1200)
+        XCTAssertEqual(m.longByCategory["Personal care"], 1200)
+        XCTAssertEqual(m.longBuys.count, 1)
+        XCTAssertTrue(Categories.isLongLasting("Personal care"))
+        XCTAssertTrue(Categories.isLongLasting("household"))
+        XCTAssertFalse(Categories.isLongLasting("Staples"))
+    }
+
     func testWeekCanStartOnAnotherDay() {
         XCTAssertEqual(Pantry.weekStart(today, first: 7), Day(2026, 11, 1))
         XCTAssertEqual(Pantry.weekStart(today), Day(2026, 11, 2))

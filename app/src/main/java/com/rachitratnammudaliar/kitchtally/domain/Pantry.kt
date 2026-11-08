@@ -147,6 +147,9 @@ object Categories {
         "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
     )
 
+    /** Things that last a month or more and aren't food: counted in Budget, not in the weekly shop. */
+    fun isLongLasting(category: String): Boolean = category.equals("Personal care", ignoreCase = true) || category.equals("Household", ignoreCase = true)
+
     /** Names used before version 1.2, and what they're called now. */
     val renamed = mapOf(
         "Fruit & veg" to "Vegetables",
@@ -442,15 +445,23 @@ object Pantry {
         val timesShared: Int,
         /** Different items bought. */
         val itemsBought: Int,
+        /** Long-lasting things bought this week (not in the numbers above). */
+        val longItems: List<ItemWeek> = emptyList(),
+        val longSpentMinor: Long = 0,
     )
 
     /**
      * Seven-day summary starting on [start] (Monday unless you chose another day). [entriesByItem] maps item id to its entries; [categoryOf] gives an
      * item's category. Used includes shared.
      */
-    fun week(start: LocalDate, entriesByItem: Map<Long, List<Entry>>, categoryOf: (Long) -> String): Week {
+    fun week(
+        start: LocalDate,
+        entriesByItem: Map<Long, List<Entry>>,
+        isLong: (Long) -> Boolean = { false },
+        categoryOf: (Long) -> String,
+    ): Week {
         val end = start.plusDays(6)
-        val items = entriesByItem.mapNotNull { (id, entries) ->
+        val all = entriesByItem.mapNotNull { (id, entries) ->
             val inWeek = entries.filter { !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }
             if (inWeek.isEmpty()) return@mapNotNull null
             val used = inWeek.filter { it.type == EventType.USED || it.type == EventType.SHARED }.sumOf { it.quantity }
@@ -458,6 +469,11 @@ object Pantry {
             val boughtEntries = inWeek.filter { it.type == EventType.BOUGHT }
             val week = ItemWeek(id, Qty.round(used), Qty.round(shared), Qty.round(boughtEntries.sumOf { it.quantity }), boughtEntries.sumOf { it.priceMinor ?: 0 })
             if (week.used == 0.0 && week.bought == 0.0) null else week
+        }
+        // Long-lasting things (face cream, toilet paper) are counted in Budget, not in the weekly shop.
+        val longItems = all.filter { isLong(it.itemId) && it.bought > 0 }.sortedByDescending { it.spentMinor }
+        val items = all.mapNotNull { w ->
+            if (!isLong(w.itemId)) w else w.copy(bought = 0.0, spentMinor = 0).takeIf { it.used > 0 }
         }
         val timesShared = entriesByItem.values.sumOf { entries ->
             entries.count { it.type == EventType.SHARED && !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }
@@ -475,7 +491,48 @@ object Pantry {
             itemsUsed = items.count { it.used > 0 },
             timesShared = timesShared,
             itemsBought = items.count { it.bought > 0 },
+            longItems = longItems,
+            longSpentMinor = longItems.sumOf { it.spentMinor },
         )
+    }
+
+    data class LongBuy(val itemId: Long, val date: LocalDate, val quantity: Double, val spentMinor: Long)
+
+    data class MonthSpend(
+        val everydayMinor: Long,
+        val longMinor: Long,
+        val everydayByCategory: Map<String, Long>,
+        val longByCategory: Map<String, Long>,
+        val longBuys: List<LongBuy>,
+    )
+
+    /** What was spent in the month that starts on [first]: everyday shopping and long-lasting items apart. */
+    fun month(
+        first: LocalDate,
+        entriesByItem: Map<Long, List<Entry>>,
+        isLong: (Long) -> Boolean,
+        categoryOf: (Long) -> String,
+    ): MonthSpend {
+        val last = first.withDayOfMonth(first.lengthOfMonth())
+        var everyday = 0L
+        var long = 0L
+        val everydayBy = mutableMapOf<String, Long>()
+        val longBy = mutableMapOf<String, Long>()
+        val buys = mutableListOf<LongBuy>()
+        entriesByItem.forEach { (id, entries) ->
+            entries.filter { it.type == EventType.BOUGHT && !it.weekDate.isBefore(first) && !it.weekDate.isAfter(last) }.forEach { e ->
+                val cost = e.priceMinor ?: 0L
+                if (isLong(id)) {
+                    long += cost
+                    longBy[categoryOf(id)] = (longBy[categoryOf(id)] ?: 0L) + cost
+                    buys += LongBuy(id, e.weekDate, e.quantity, cost)
+                } else {
+                    everyday += cost
+                    everydayBy[categoryOf(id)] = (everydayBy[categoryOf(id)] ?: 0L) + cost
+                }
+            }
+        }
+        return MonthSpend(everyday, long, everydayBy.filterValues { it > 0 }, longBy.filterValues { it > 0 }, buys.sortedByDescending { it.date })
     }
 
     /** Total paid for everything bought from [from] to [to], both included. */

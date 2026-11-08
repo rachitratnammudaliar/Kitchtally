@@ -432,6 +432,9 @@ final class Store: ObservableObject {
         persist()
     }
 
+    /// Face cream, toilet paper, shower gel and the like are counted in Budget, not in the weekly shop.
+    func isLong(_ id: Int64) -> Bool { item(id).map { Categories.isLongLasting($0.category) } ?? false }
+
     func isForNextWeek(_ today: Day) -> Bool { forNextWeekUntil > today.epochDay }
 
     func setForNextWeek(_ on: Bool) {

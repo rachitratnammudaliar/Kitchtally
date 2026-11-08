@@ -317,6 +317,7 @@ private fun MainTabs(
                         when (tab) {
                             "shopping" -> "Shopping list"
                             "week" -> "This week"
+                            "budget" -> "Budget"
                             else -> "Kitchtally"
                         },
                         fontWeight = FontWeight.SemiBold,
@@ -332,7 +333,7 @@ private fun MainTabs(
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
             )
-            if (tab != "week") {
+            if (tab == "pantry" || tab == "shopping") {
                 val forNextUntil by vm.forNextWeekUntil.collectAsStateWithLifecycle()
                 Column(Modifier.padding(horizontal = 16.dp)) {
                     SwitchRow("Shopping for next week", "Things you buy now count in next week's summary", forNextUntil > today.toEpochDay()) { vm.setForNextWeek(it) }
@@ -354,6 +355,7 @@ private fun MainTabs(
                     label = { Text("To buy") },
                 )
                 NavigationBarItem(selected = tab == "week", onClick = { onTab("week") }, icon = { Icon(Icons.Default.DateRange, null) }, label = { Text("Weekly") })
+                NavigationBarItem(selected = tab == "budget", onClick = { onTab("budget") }, icon = { Text("💶") }, label = { Text("Budget") })
             }
         },
         floatingActionButton = {
@@ -378,6 +380,7 @@ private fun MainTabs(
         when (tab) {
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
+            "budget" -> BudgetScreen(vm, s, today, currency, onOpen, modifier)
             else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
         }
     }
@@ -436,7 +439,7 @@ private fun PantryList(
         if (list.isEmpty()) null else c to list
     } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it })
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
-    val week = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst)), state.entriesByItem) { id -> state.item(id)?.category ?: "" }
+    val week = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst)), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = { id -> state.item(id)?.category ?: "" })
     val toBuy = state.items.count { onShoppingList(it, state, today) }
     val almostOut = state.items.count { !it.unsure && state.stock(it.id) > 0 && Pantry.status(state.entries(it.id), it.counting(), today) != StockStatus.OK }
 
@@ -780,8 +783,8 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
     val start = Pantry.weekStart(today, DayOfWeek.of(weekFirst)).minusWeeks(offset)
     val categoryOf: (Long) -> String = { id -> state.item(id)?.category ?: "Other" }
-    val week = Pantry.week(start, state.entriesByItem, categoryOf)
-    val previous = Pantry.week(start.minusWeeks(1), state.entriesByItem, categoryOf)
+    val week = Pantry.week(start, state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = categoryOf)
+    val previous = Pantry.week(start.minusWeeks(1), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = categoryOf)
     val bought = week.items.filter { it.bought > 0 }.sortedBy { state.item(it.itemId)?.name?.lowercase() }
     val used = week.items.filter { it.used > 0 }
 
@@ -827,6 +830,8 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                     Text(if (offset == 0L) "New this week" else "That week", style = MaterialTheme.typography.labelLarge, color = on)
                     Text(
                         when {
+                            week.itemsBought == 0 && week.itemsUsed == 0 && week.longItems.isNotEmpty() ->
+                                "${week.longItems.size} long-lasting thing${if (week.longItems.size == 1) "" else "s"} bought"
                             week.itemsBought == 0 && week.itemsUsed == 0 -> "Nothing logged yet"
                             week.itemsBought == 0 -> "${week.itemsUsed} item${if (week.itemsUsed == 1) "" else "s"} used"
                             else -> "${week.itemsBought} thing${if (week.itemsBought == 1) "" else "s"} bought"
@@ -844,7 +849,7 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                 }
             }
         }
-        if (week.items.isEmpty()) {
+        if (week.items.isEmpty() && week.longItems.isEmpty()) {
             item(key = "empty") {
                 Text(
                     "Nothing used or bought this week. Tap − or 🍳 Cook a meal when you use something, and it shows up here.",
@@ -873,6 +878,16 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                 }
             }
         }
+        if (week.longItems.isNotEmpty()) {
+            item(key = "long-title") { SectionLabel("Long-lasting · counted in Budget") }
+            week.longItems.forEach { w ->
+                val thing = state.item(w.itemId) ?: return@forEach
+                item(key = "l-${w.itemId}") {
+                    WeekRow(thing, "Bought ${thing.unitValue().label(w.bought)}", if (showSpending && w.spentMinor > 0) Money.format(w.spentMinor, currency) else null) { onOpen(thing.id) }
+                }
+            }
+            item(key = "long-hint") { Hint("Face cream, toilet paper, shower gel and other non-food things last a month or more, so they're not in this week's totals. See the Budget tab.") }
+        }
         // Money stays out of the way until you ask for it.
         item(key = "spending-toggle") {
             TextButton(onClick = { vm.setShowSpending(!showSpending) }, modifier = Modifier.fillMaxWidth()) {
@@ -897,7 +912,7 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                         }
                         if (budget > 0) {
                             val monthStart = today.withDayOfMonth(1)
-                            val month = Pantry.spentBetween(state.entriesByItem, monthStart, today)
+                            val month = Pantry.spentBetween(state.entriesByItem.filterKeys { !state.isLong(it) }, monthStart, today)
                             HorizontalDivider()
                             Text("This month: ${Money.format(month, currency)} of ${Money.format(budget, currency)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                             LinearProgressIndicator(progress = { (month.toFloat() / budget).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)))
@@ -925,7 +940,7 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
 }
 
 @Composable
-private fun WeekRow(item: Item, text: String, money: String?, onClick: () -> Unit) {
+internal fun WeekRow(item: Item, text: String, money: String?, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             ItemImage(item.name, item.photoFile, size = 42.dp, category = item.category)
