@@ -62,6 +62,8 @@ import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
 import com.rachitratnammudaliar.kitchtally.domain.Shops
 import com.rachitratnammudaliar.kitchtally.domain.Suggestions
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.LocalDate
 
 /** "Take photo" and "Choose photo" buttons. Calls [onPicked] with the stored file name. */
@@ -449,6 +451,9 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     var qtyText by rememberSaveable { mutableStateOf("1") }
     var inPacks by rememberSaveable { mutableStateOf(true) }
     var day by rememberSaveable { mutableStateOf(today.toEpochDay()) }
+    var nextWeek by rememberSaveable { mutableStateOf(false) }
+    val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
+    val forNextUntil by vm.forNextWeekUntil.collectAsStateWithLifecycle()
     var perUnit by rememberSaveable { mutableStateOf(false) }
     var priceText by rememberSaveable { mutableStateOf("") }
     var shop by rememberSaveable { mutableStateOf("") }
@@ -464,12 +469,14 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             inPacks = false
             qtyText = Qty.format(existing.quantity)
             day = existing.epochDay
+            nextWeek = existing.countsFromDay != null
             priceText = existing.priceMinor?.let { Money.minorToInput(it) } ?: ""
             shop = existing.shop
             receipt = existing.receiptFile
             originalReceipt = existing.receiptFile
             note = existing.note
         } else {
+            nextWeek = forNextUntil > today.toEpochDay()
             // Pre-fill with last time's unit price and shop.
             val entries = state.entries(itemId)
             val last = Pantry.lastPriced(entries)
@@ -527,6 +534,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 receiptFile = receipt,
                 note = note.trim(),
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                countsFromDay = if (nextWeek) Pantry.weekStart(LocalDate.ofEpochDay(day), DayOfWeek.of(weekFirst)).plusWeeks(1).toEpochDay() else null,
             ),
             replacedReceipt = originalReceipt,
         )
@@ -568,6 +576,10 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             OutlinedButton(onClick = { pickDate(context, LocalDate.ofEpochDay(day), max = today) { day = it.toEpochDay() } }, modifier = Modifier.fillMaxWidth()) {
                 Text("Bought on ${LocalDate.ofEpochDay(day).format(dateFormat)}")
             }
+
+            SectionLabel("Counts in")
+            ChipRow(listOf(false, true), nextWeek, { if (it) "Next week" else "This week" }, { nextWeek = it })
+            Hint("A shop for next week stays in your pantry now, but shows in next week's summary and spending.")
 
             SectionLabel("Price (optional)")
             val perLabel = if (packMode) "per pack" else unit.priceLabel

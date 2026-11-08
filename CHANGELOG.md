@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0
+
+**New**
+- **Shopping for next week:** switch it on (top of Pantry and To buy) before you log a shop, and everything you buy counts in next week's summary and spending. It stays in your pantry stock right away, and the switch turns itself off when the new week starts
+- **Counts in: This week | Next week** on every purchase, so you can move one you already logged: open it and change it
+- **Week starts on:** choose any day, in Settings
+
+**Changed**
+- Backups carry the new "counts in" setting; older backups still open
+
 ## 1.3.0
 
 **New**

@@ -50,6 +50,28 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(Pantry.lastBought(e)?.date, d(2))
     }
 
+    func testAShopForNextWeekCountsInNextWeek() {
+        let start = Pantry.weekStart(today)
+        let next = start.plusDays(7)
+        let forNext = Entry(type: .BOUGHT, date: start.plusDays(6), quantity: 2, priceMinor: 300, shop: "IKI", countsFrom: next)
+        let usedNow = Entry(type: .USED, date: start.plusDays(6), quantity: 1)
+        let items: [Int64: [Entry]] = [1: [forNext, usedNow]]
+        let thisWeek = Pantry.week(start, items) { _ in "Other" }
+        let nextWeek = Pantry.week(next, items) { _ in "Other" }
+        XCTAssertEqual(thisWeek.itemsBought, 0)
+        XCTAssertEqual(thisWeek.spentMinor, 0)
+        XCTAssertEqual(thisWeek.itemsUsed, 1)
+        XCTAssertEqual(nextWeek.itemsBought, 1)
+        XCTAssertEqual(nextWeek.spentMinor, 300)
+        XCTAssertEqual(Pantry.stock([forNext, usedNow]), 1)
+    }
+
+    func testWeekCanStartOnAnotherDay() {
+        XCTAssertEqual(Pantry.weekStart(today, first: 7), Day(2026, 11, 1))
+        XCTAssertEqual(Pantry.weekStart(today), Day(2026, 11, 2))
+        XCTAssertEqual(Pantry.weekStart(Day(2026, 11, 8), first: 6), Day(2026, 11, 7))
+    }
+
     func testWeek() {
         let start = Pantry.weekStart(today)
         XCTAssertEqual(start, Day(2026, 11, 2))

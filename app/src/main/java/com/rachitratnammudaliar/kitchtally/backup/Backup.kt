@@ -56,7 +56,8 @@ object Backup {
                     .put("priceMinor", e.priceMinor ?: JSONObject.NULL)
                     .put("shop", e.shop)
                     .put("note", e.note)
-                    .put("createdAt", e.createdAt),
+                    .put("createdAt", e.createdAt)
+                    .put("countsFromDay", e.countsFromDay ?: JSONObject.NULL),
             )
         }
         val notesJson = JSONArray()
@@ -130,6 +131,7 @@ object Backup {
                 shop = o.optString("shop").trim().take(40),
                 note = o.optString("note").take(200),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                countsFromDay = if (type == EventType.BOUGHT && o.has("countsFromDay") && !o.isNull("countsFromDay")) o.optLong("countsFromDay") else null,
             )
         }
         val notes = mutableListOf<ShoppingNote>()

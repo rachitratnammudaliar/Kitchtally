@@ -30,6 +30,7 @@ struct ShoppingView: View {
 
         NavigationStack(path: $path) {
             List {
+                ForNextWeekSection(today: today)
                 Section {
                     HStack {
                         TextField("Add something to buy", text: $newText)
@@ -187,7 +188,7 @@ struct WeekView: View {
     @State private var path: [Int64] = []
 
     var body: some View {
-        let start = Pantry.weekStart(today).plusDays(-7 * offset)
+        let start = Pantry.weekStart(today, first: store.weekStartDay).plusDays(-7 * offset)
         let byItem = store.entriesByItem
         let categoryOf: (Int64) -> String = { id in store.item(id)?.category ?? "Other" }
         let week = Pantry.week(start, byItem, categoryOf: categoryOf)
@@ -311,6 +312,23 @@ struct WeekView: View {
     }
 }
 
+/// "Shopping for next week": purchases logged while it is on count in next week's summary.
+struct ForNextWeekSection: View {
+    @EnvironmentObject private var store: Store
+    let today: Day
+
+    var body: some View {
+        Section {
+            Toggle(isOn: Binding(get: { store.isForNextWeek(today) }, set: { store.setForNextWeek($0) })) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Shopping for next week")
+                    Text("Things you buy now count in next week's summary").font(.caption).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+}
+
 struct SettingsView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -331,6 +349,16 @@ struct SettingsView: View {
                     Text("Currency")
                 } footer: {
                     Text("Changing it doesn't convert amounts you've already entered.")
+                }
+
+                Section {
+                    Picker("Week starts on", selection: $store.weekStartDay) {
+                        ForEach(1...7, id: \.self) { Text(Calendar.current.weekdaySymbols[$0 % 7]).tag($0) }
+                    }
+                } header: {
+                    Text("Week")
+                } footer: {
+                    Text("The Weekly tab counts seven days from this day. To count a shop for next week, switch on Shopping for next week before you log it.")
                 }
 
                 Section {

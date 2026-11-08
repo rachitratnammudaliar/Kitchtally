@@ -88,6 +88,8 @@ data class Event(
     val receiptFile: String = "",
     val note: String = "",
     val createdAt: Long = System.currentTimeMillis(),
+    /** For BOUGHT: the day this purchase starts counting on the Weekly tab (a shop for next week). Null = the day it happened. */
+    val countsFromDay: Long? = null,
 )
 
 fun Item.unitValue(): QtyUnit = QtyUnit.fromName(unit)
@@ -104,7 +106,7 @@ fun Event.typeValue(): EventType = EventType.fromName(type)
 
 fun Event.date(): LocalDate = LocalDate.ofEpochDay(epochDay)
 
-fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop)
+fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop, countsFromDay?.let { LocalDate.ofEpochDay(it) })
 
 @Dao
 interface PantryDao {
@@ -216,7 +218,14 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 4, exportSchema = false)
+/** Version 4 -> 5 (app 1.3 -> 1.4.0): a purchase can count for next week. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN countsFromDay INTEGER")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 5, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -229,7 +238,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build().also { instance = it }
             }
     }

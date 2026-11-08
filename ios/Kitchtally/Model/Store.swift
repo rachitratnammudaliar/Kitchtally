@@ -62,10 +62,12 @@ struct Event: Identifiable, Equatable {
     var receiptFile: String = ""
     var note: String = ""
     var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    /// For a purchase: the day it starts counting on the Weekly tab (a shop for next week). Nil = the day it happened.
+    var countsFromDay: Int? = nil
 
     var typeValue: EventType { EventType.from(type) }
     var date: Day { Day(epochDay: epochDay) }
-    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop) }
+    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFrom: countsFromDay.map { Day(epochDay: $0) }) }
 }
 
 /// The same JSON format as the Android app's backups. The app's own data file also keeps photo names.
@@ -93,12 +95,13 @@ enum Backup {
             var o: [String: Any] = [
                 "item": e.itemId, "type": e.type, "epochDay": e.epochDay, "quantity": e.quantity,
                 "priceMinor": e.priceMinor.map { $0 as Any } ?? NSNull(), "shop": e.shop, "note": e.note, "createdAt": e.createdAt,
+                "countsFromDay": e.countsFromDay.map { $0 as Any } ?? NSNull(),
             ]
             if includePhotos { o["receiptFile"] = e.receiptFile }
             return o
         }
         let notesJson: [[String: Any]] = notes.map { ["text": $0.text, "createdAt": $0.createdAt] }
-        let root: [String: Any] = ["format": format, "version": 4, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
+        let root: [String: Any] = ["format": format, "version": 5, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -163,7 +166,8 @@ enum Backup {
                 shop: String(string(o, "shop").trimmingCharacters(in: .whitespaces).prefix(40)),
                 receiptFile: includePhotos ? string(o, "receiptFile") : "",
                 note: String(string(o, "note").prefix(200)),
-                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+                createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
+                countsFromDay: type == .BOUGHT ? number(o, "countsFromDay")?.intValue : nil
             ))
         }
         var notes: [ShoppingNote] = []
@@ -251,6 +255,17 @@ final class Store: ObservableObject {
         didSet { UserDefaults.standard.set(showSpending, forKey: "show_spending") }
     }
     /// Monthly budget in cents; 0 means off.
+    /// First day of the week: 1 = Monday ... 7 = Sunday.
+    @Published var weekStartDay: Int {
+        didSet {
+            UserDefaults.standard.set(weekStartDay, forKey: "week_start_day")
+            // The old switch was worked out for the old week.
+            if oldValue != weekStartDay { setForNextWeek(false) }
+        }
+    }
+    /// "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off.
+    @Published private(set) var forNextWeekUntil: Int
+
     @Published var budgetMinor: Int64 {
         didSet { UserDefaults.standard.set(budgetMinor, forKey: "budget_minor") }
     }
@@ -267,6 +282,9 @@ final class Store: ObservableObject {
         currency = UserDefaults.standard.string(forKey: "currency") ?? "EUR"
         showSpending = UserDefaults.standard.bool(forKey: "show_spending")
         budgetMinor = Int64(max(0, UserDefaults.standard.integer(forKey: "budget_minor")))
+        let savedStart = UserDefaults.standard.integer(forKey: "week_start_day")
+        weekStartDay = (1...7).contains(savedStart) ? savedStart : 1
+        forNextWeekUntil = UserDefaults.standard.integer(forKey: "for_next_week_until")
         load()
     }
 
@@ -392,10 +410,20 @@ final class Store: ObservableObject {
         events.append(copy)
     }
 
+    func isForNextWeek(_ today: Day) -> Bool { forNextWeekUntil > today.epochDay }
+
+    func setForNextWeek(_ on: Bool) {
+        let until = on ? Pantry.weekStart(Day.today(), first: weekStartDay).plusDays(7).epochDay : 0
+        forNextWeekUntil = until
+        UserDefaults.standard.set(until, forKey: "for_next_week_until")
+    }
+
     /// Logs a quick change today. Returns its id for Undo.
     @discardableResult
     func log(_ itemId: Int64, _ type: EventType, quantity: Double = 1, priceMinor: Int64? = nil, shop: String = "") -> Int64 {
-        appendEvent(Event(itemId: itemId, type: type.rawValue, epochDay: Day.today().epochDay, quantity: quantity, priceMinor: priceMinor, shop: shop))
+        let today = Day.today()
+        let countsFrom: Int? = (type == .BOUGHT && isForNextWeek(today)) ? forNextWeekUntil : nil
+        appendEvent(Event(itemId: itemId, type: type.rawValue, epochDay: today.epochDay, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFromDay: countsFrom))
         if type == .BOUGHT { clearRefill(itemId) }
         persist()
         return nextEventId - 1

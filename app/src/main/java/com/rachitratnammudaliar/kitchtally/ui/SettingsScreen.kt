@@ -39,7 +39,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.format.TextStyle
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
@@ -91,6 +94,12 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             SectionLabel("Currency")
             ChipRow(Money.currencies, currency, { it }, vm::setCurrency)
             Hint("Prices are shown in this currency. Changing it doesn't convert amounts you've already entered.")
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionLabel("Week starts on")
+            val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
+            ChipRow((1..7).toList(), weekFirst, { DayOfWeek.of(it).getDisplayName(TextStyle.FULL, Locale.getDefault()) }, vm::setWeekStartDay)
+            Hint("The Weekly tab counts seven days from this day. To count a shop for next week, switch on Shopping for next week before you log it.")
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Spending")

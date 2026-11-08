@@ -86,6 +86,32 @@ class PantryTest {
     }
 
     @Test
+    fun aShopForNextWeekCountsInNextWeek() {
+        val start = Pantry.weekStart(today)
+        val next = start.plusWeeks(1)
+        // Bought on the last day of this week, but meant for next week.
+        val forNext = Entry(EventType.BOUGHT, start.plusDays(6), 2.0, 300, "IKI", next)
+        val usedNow = Entry(EventType.USED, start.plusDays(6), 1.0)
+        val items = mapOf(1L to listOf(forNext, usedNow))
+        val thisWeek = Pantry.week(start, items) { "Other" }
+        val nextWeek = Pantry.week(next, items) { "Other" }
+        assertEquals(0, thisWeek.itemsBought)
+        assertEquals(0L, thisWeek.spentMinor)
+        assertEquals(1, thisWeek.itemsUsed)
+        assertEquals(1, nextWeek.itemsBought)
+        assertEquals(300L, nextWeek.spentMinor)
+        // Stock is unaffected: it is in the cupboard now.
+        assertEquals(1.0, Pantry.stock(listOf(forNext, usedNow)), 0.0)
+    }
+
+    @Test
+    fun weekCanStartOnAnotherDay() {
+        assertEquals(LocalDate.of(2026, 11, 1), Pantry.weekStart(today, java.time.DayOfWeek.SUNDAY))
+        assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(today))
+        assertEquals(LocalDate.of(2026, 11, 7), Pantry.weekStart(LocalDate.of(2026, 11, 8), java.time.DayOfWeek.SATURDAY))
+    }
+
+    @Test
     fun tapAmounts() {
         assertEquals(1.0, Pantry.defaultStep(QtyUnit.PACKET), 0.0)
         assertEquals(0.5, Pantry.defaultStep(QtyUnit.KG), 0.0)

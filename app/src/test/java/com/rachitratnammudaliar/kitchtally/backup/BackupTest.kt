@@ -14,7 +14,7 @@ class BackupTest {
         val rice = Item(id = 7, name = "Basmati rice", category = "Grains & flour", unit = "KG", life = "LONG", lowAt = 1.5, refillNeeded = true, photoFile = "x.jpg", notes = "5 kg bag", createdAt = 1, step = 0.25, hiddenFromList = true, packSize = 5.0, unsure = true, countMeals = true, mealsPerUnit = 6.0, lowInMeals = true)
         val bread = Item(id = 9, name = "Bread", category = "Bread & bakery", unit = "PACKET", life = "SHORT", createdAt = 2)
         val events = listOf(
-            Event(id = 1, itemId = 7, type = "BOUGHT", epochDay = 20000, quantity = 5.0, priceMinor = 1245, shop = "Maxima", receiptFile = "r.jpg", createdAt = 3),
+            Event(id = 1, itemId = 7, type = "BOUGHT", epochDay = 20000, quantity = 5.0, priceMinor = 1245, shop = "Maxima", receiptFile = "r.jpg", createdAt = 3, countsFromDay = 20007),
             Event(id = 2, itemId = 7, type = "USED", epochDay = 20001, quantity = 0.5, createdAt = 4),
             Event(id = 3, itemId = 9, type = "SHARED", epochDay = 20002, quantity = 1.0, createdAt = 5),
             Event(id = 4, itemId = 9, type = "ADJUST", epochDay = 20002, quantity = -1.0, note = "Correction", createdAt = 6),

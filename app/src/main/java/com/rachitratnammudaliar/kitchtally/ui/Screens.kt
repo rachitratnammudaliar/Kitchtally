@@ -102,6 +102,7 @@ import com.rachitratnammudaliar.kitchtally.domain.StockStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -309,6 +310,7 @@ private fun MainTabs(
     }
     Scaffold(
         topBar = {
+          Column {
             TopAppBar(
                 title = {
                     Text(
@@ -330,6 +332,13 @@ private fun MainTabs(
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
             )
+            if (tab != "week") {
+                val forNextUntil by vm.forNextWeekUntil.collectAsStateWithLifecycle()
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    SwitchRow("Shopping for next week", "Things you buy now count in next week's summary", forNextUntil > today.toEpochDay()) { vm.setForNextWeek(it) }
+                }
+            }
+          }
         },
         bottomBar = {
             NavigationBar {
@@ -426,7 +435,8 @@ private fun PantryList(
         val list = shown.filter { !it.unsure && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
     } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it })
-    val week = Pantry.week(Pantry.weekStart(today), state.entriesByItem) { id -> state.item(id)?.category ?: "" }
+    val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
+    val week = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst)), state.entriesByItem) { id -> state.item(id)?.category ?: "" }
     val toBuy = state.items.count { onShoppingList(it, state, today) }
     val almostOut = state.items.count { !it.unsure && state.stock(it.id) > 0 && Pantry.status(state.entries(it.id), it.counting(), today) != StockStatus.OK }
 
@@ -766,7 +776,8 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
     var offset by rememberSaveable { mutableLongStateOf(0L) }
     val showSpending by vm.showSpending.collectAsStateWithLifecycle()
     val budget by vm.budgetMinor.collectAsStateWithLifecycle()
-    val start = Pantry.weekStart(today).minusWeeks(offset)
+    val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
+    val start = Pantry.weekStart(today, DayOfWeek.of(weekFirst)).minusWeeks(offset)
     val categoryOf: (Long) -> String = { id -> state.item(id)?.category ?: "Other" }
     val week = Pantry.week(start, state.entriesByItem, categoryOf)
     val previous = Pantry.week(start.minusWeeks(1), state.entriesByItem, categoryOf)

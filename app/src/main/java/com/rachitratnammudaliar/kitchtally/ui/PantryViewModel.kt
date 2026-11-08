@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.time.DayOfWeek
 import java.time.LocalDate
 
 /** Everything the screens show, kept together so stock and lists always agree. */
@@ -85,6 +86,29 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         prefs.showSpending = show
         _showSpending.value = show
     }
+
+    private val _weekStartDay = MutableStateFlow(prefs.weekStartDay)
+    val weekStartDay: StateFlow<Int> = _weekStartDay.asStateFlow()
+
+    fun setWeekStartDay(day: Int) {
+        prefs.weekStartDay = day
+        _weekStartDay.value = prefs.weekStartDay
+        // The old switch was worked out for the old week.
+        setForNextWeek(false)
+    }
+
+    private val _forNextWeekUntil = MutableStateFlow(prefs.forNextWeekUntil)
+    /** Epoch day the "shopping for next week" switch lasts until; it is on while today is before it. */
+    val forNextWeekUntil: StateFlow<Long> = _forNextWeekUntil.asStateFlow()
+
+    fun setForNextWeek(on: Boolean) {
+        val until = if (on) Pantry.weekStart(LocalDate.now(), DayOfWeek.of(prefs.weekStartDay)).plusWeeks(1).toEpochDay() else 0L
+        prefs.forNextWeekUntil = until
+        _forNextWeekUntil.value = until
+    }
+
+    /** Where a purchase made right now should start counting, or null for this week. */
+    private fun buyCountsFrom(): Long? = prefs.forNextWeekUntil.takeIf { it > LocalDate.now().toEpochDay() }
 
     private val _budgetMinor = MutableStateFlow(prefs.budgetMinor)
     val budgetMinor: StateFlow<Long> = _budgetMinor.asStateFlow()
@@ -138,7 +162,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                         val amount = Pantry.buyAmount(item.unitValue(), entries, item.packSize)
                         val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
                         val id = dao.insert(
-                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.expectedPriceMinor(item.unitValue(), entries, item.packSize), shop = shop),
+                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.expectedPriceMinor(item.unitValue(), entries, item.packSize), shop = shop, countsFromDay = buyCountsFrom()),
                         )
                         dao.clearRefill(item.id)
                         QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList)
@@ -234,7 +258,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             tapLock.withLock {
                 val id = dao.insert(
-                    Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount, priceMinor = price, shop = shop),
+                    Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount, priceMinor = price, shop = shop, countsFromDay = buyCountsFrom()),
                 )
                 dao.clearRefill(item.id)
                 onLogged(QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList))
@@ -267,7 +291,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                         if (amount <= 0) return@withLock
                         val shop = Pantry.lastPriced(entries)?.shop?.takeIf { it.isNotBlank() } ?: Pantry.lastBought(entries)?.shop ?: ""
                         val id = dao.insert(
-                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.priceFor(entries, amount), shop = shop),
+                            Event(itemId = item.id, type = EventType.BOUGHT.name, epochDay = today, quantity = amount, priceMinor = Pantry.priceFor(entries, amount), shop = shop, countsFromDay = buyCountsFrom()),
                         )
                         dao.clearRefill(item.id)
                         onDone("Added ${unit.label(amount)}") { undoBuy(QuickBuy(id, amount, item.id, item.refillNeeded, item.hiddenFromList)) }
@@ -322,7 +346,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     fun log(itemId: Long, type: EventType, quantity: Double = 1.0, priceMinor: Long? = null, shop: String = "", onLogged: (Long) -> Unit = {}) {
         viewModelScope.launch {
             val id = dao.insert(
-                Event(itemId = itemId, type = type.name, epochDay = LocalDate.now().toEpochDay(), quantity = quantity, priceMinor = priceMinor, shop = shop),
+                Event(itemId = itemId, type = type.name, epochDay = LocalDate.now().toEpochDay(), quantity = quantity, priceMinor = priceMinor, shop = shop, countsFromDay = if (type == EventType.BOUGHT) buyCountsFrom() else null),
             )
             if (type == EventType.BOUGHT) dao.clearRefill(itemId)
             onLogged(id)

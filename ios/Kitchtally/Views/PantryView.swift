@@ -17,6 +17,7 @@ struct PantryView: View {
         NavigationStack(path: $path) {
             List {
                 summary
+                ForNextWeekSection(today: today)
                 if store.items.isEmpty {
                     Section {
                         VStack(spacing: 10) {
@@ -88,7 +89,7 @@ struct PantryView: View {
     }
 
     private var summary: some View {
-        let week = Pantry.week(Pantry.weekStart(today), store.entriesByItem) { id in store.item(id)?.category ?? "" }
+        let week = Pantry.week(Pantry.weekStart(today, first: store.weekStartDay), store.entriesByItem) { id in store.item(id)?.category ?? "" }
         let toBuy = store.items.filter { store.onShoppingList($0, today) }.count + store.notes.count
         let almostOut = store.items.filter { !$0.unsure && store.stock($0.id) > 0 && store.status($0, today) != .ok }.count
         return Section {

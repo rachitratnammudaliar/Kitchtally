@@ -160,6 +160,11 @@ struct Entry {
     let quantity: Double
     var priceMinor: Int64? = nil
     var shop: String = ""
+    /// A purchase made for next week counts from this day on the Weekly tab.
+    var countsFrom: Day? = nil
+
+    /// The day this entry counts on the Weekly tab: purchases may be moved to next week.
+    var weekDate: Day { type == .BOUGHT ? (countsFrom ?? date) : date }
 }
 
 enum Categories {
@@ -456,9 +461,9 @@ enum Pantry {
         return today.epochDay - last.date.epochDay > life.freshDays
     }
 
-    /// Monday of the week [day] is in. 1 January 1970 was a Thursday.
-    static func weekStart(_ day: Day) -> Day {
-        let index = ((day.epochDay + 3) % 7 + 7) % 7
+    /// First day of the week [day] is in. [first] is 1 for Monday up to 7 for Sunday. 1 January 1970 was a Thursday.
+    static func weekStart(_ day: Day, first: Int = 1) -> Day {
+        let index = ((day.epochDay + 3 - (first - 1)) % 7 + 7) % 7
         return day.plusDays(-index)
     }
 
@@ -486,7 +491,7 @@ enum Pantry {
         let end = start.plusDays(6)
         var items: [ItemWeek] = []
         for (id, entries) in entriesByItem {
-            let inWeek = entries.filter { !($0.date < start) && !($0.date > end) }
+            let inWeek = entries.filter { !($0.weekDate < start) && !($0.weekDate > end) }
             if inWeek.isEmpty { continue }
             let used = inWeek.filter { $0.type == .USED || $0.type == .SHARED }.reduce(0) { $0 + $1.quantity }
             let shared = inWeek.filter { $0.type == .SHARED }.reduce(0) { $0 + $1.quantity }
@@ -502,7 +507,7 @@ enum Pantry {
             items.append(w)
         }
         let timesShared = entriesByItem.values.reduce(0) { sum, entries in
-            sum + entries.filter { $0.type == .SHARED && !($0.date < start) && !($0.date > end) }.count
+            sum + entries.filter { $0.type == .SHARED && !($0.weekDate < start) && !($0.weekDate > end) }.count
         }
         var byCategory: [String: Int64] = [:]
         for w in items where w.spentMinor > 0 { byCategory[categoryOf(w.itemId), default: 0] += w.spentMinor }

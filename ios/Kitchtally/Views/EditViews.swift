@@ -292,6 +292,7 @@ struct PurchaseView: View {
     @State private var qtyText = "1"
     @State private var inPacks = true
     @State private var date = Date()
+    @State private var nextWeek = false
     @State private var perUnit = false
     @State private var priceText = ""
     @State private var shop = ""
@@ -329,12 +330,14 @@ struct PurchaseView: View {
             inPacks = false
             qtyText = Qty.format(e.quantity)
             date = e.date.localDate
+            nextWeek = e.countsFromDay != nil
             priceText = e.priceMinor.map { Money.minorToInput($0) } ?? ""
             shop = e.shop
             receipt = e.receiptFile
             originalReceipt = e.receiptFile
             note = e.note
         } else {
+            nextWeek = store.isForNextWeek(today)
             let entries = store.entries(target.itemId)
             let last = Pantry.lastPriced(entries)
             shop = (last?.shop.isEmpty == false ? last?.shop : Pantry.lastBought(entries)?.shop) ?? ""
@@ -368,7 +371,8 @@ struct PurchaseView: View {
             shop: shop.trimmingCharacters(in: .whitespaces),
             receiptFile: receipt,
             note: note.trimmingCharacters(in: .whitespaces),
-            createdAt: existing?.createdAt ?? Int64(Date().timeIntervalSince1970 * 1000)
+            createdAt: existing?.createdAt ?? Int64(Date().timeIntervalSince1970 * 1000),
+            countsFromDay: nextWeek ? Pantry.weekStart(Day(localDate: date), first: store.weekStartDay).plusDays(7).epochDay : nil
         ))
         dismiss()
     }
@@ -398,6 +402,13 @@ struct PurchaseView: View {
                     if showErrors && qty == nil { Text("Enter an amount above 0").font(.caption).foregroundColor(.red) }
                     if packMode, let q = qty { Text("= \(unit.label(q))").font(.caption).foregroundColor(.secondary) }
                     DatePicker("Bought on", selection: $date, in: ...Date(), displayedComponents: .date)
+                    Picker("Counts in", selection: $nextWeek) {
+                        Text("This week").tag(false)
+                        Text("Next week").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    Text("A shop for next week stays in your pantry now, but shows in next week's summary and spending.")
+                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 Section("Price (optional)") {

@@ -134,6 +134,16 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("show_spending", false)
         set(value) = prefs.edit().putBoolean("show_spending", value).apply()
 
+    /** First day of the week: 1 = Monday ... 7 = Sunday. */
+    var weekStartDay: Int
+        get() = prefs.getInt("week_start_day", 1).coerceIn(1, 7)
+        set(value) = prefs.edit().putInt("week_start_day", value.coerceIn(1, 7)).apply()
+
+    /** "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off. */
+    var forNextWeekUntil: Long
+        get() = prefs.getLong("for_next_week_until", 0L)
+        set(value) = prefs.edit().putLong("for_next_week_until", value).apply()
+
     /** Monthly budget in cents; 0 means off. */
     var budgetMinor: Long
         get() = prefs.getLong("budget_minor", 0L)

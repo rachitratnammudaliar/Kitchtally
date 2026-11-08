@@ -134,7 +134,12 @@ data class Entry(
     val quantity: Double,
     val priceMinor: Long? = null,
     val shop: String = "",
-)
+    /** A purchase made for next week counts from this day on the Weekly tab. */
+    val countsFrom: LocalDate? = null,
+) {
+    /** The day this entry counts on the Weekly tab: purchases may be moved to next week. */
+    val weekDate: LocalDate get() = if (type == EventType.BOUGHT) countsFrom ?: date else date
+}
 
 object Categories {
     val presets = listOf(
@@ -418,7 +423,7 @@ object Pantry {
         return ChronoUnit.DAYS.between(last.date, today) > life.freshDays
     }
 
-    fun weekStart(day: LocalDate): LocalDate = day.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    fun weekStart(day: LocalDate, first: DayOfWeek = DayOfWeek.MONDAY): LocalDate = day.with(TemporalAdjusters.previousOrSame(first))
 
     data class ItemWeek(val itemId: Long, val used: Double, val shared: Double, val bought: Double, val spentMinor: Long)
 
@@ -438,13 +443,13 @@ object Pantry {
     )
 
     /**
-     * Monday-to-Sunday summary. [entriesByItem] maps item id to its entries; [categoryOf] gives an
+     * Seven-day summary starting on [start] (Monday unless you chose another day). [entriesByItem] maps item id to its entries; [categoryOf] gives an
      * item's category. Used includes shared.
      */
     fun week(start: LocalDate, entriesByItem: Map<Long, List<Entry>>, categoryOf: (Long) -> String): Week {
         val end = start.plusDays(6)
         val items = entriesByItem.mapNotNull { (id, entries) ->
-            val inWeek = entries.filter { !it.date.isBefore(start) && !it.date.isAfter(end) }
+            val inWeek = entries.filter { !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }
             if (inWeek.isEmpty()) return@mapNotNull null
             val used = inWeek.filter { it.type == EventType.USED || it.type == EventType.SHARED }.sumOf { it.quantity }
             val shared = inWeek.filter { it.type == EventType.SHARED }.sumOf { it.quantity }
@@ -453,7 +458,7 @@ object Pantry {
             if (week.used == 0.0 && week.bought == 0.0) null else week
         }
         val timesShared = entriesByItem.values.sumOf { entries ->
-            entries.count { it.type == EventType.SHARED && !it.date.isBefore(start) && !it.date.isAfter(end) }
+            entries.count { it.type == EventType.SHARED && !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }
         }
         val byCategory = items.filter { it.spentMinor > 0 }
             .groupBy { categoryOf(it.itemId) }
