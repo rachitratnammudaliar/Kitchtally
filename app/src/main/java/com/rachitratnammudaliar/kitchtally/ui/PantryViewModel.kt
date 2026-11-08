@@ -300,7 +300,13 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                         val diff = Qty.round(amount - stock)
                         if (diff == 0.0) return@withLock
                         val id = dao.insert(Event(itemId = item.id, type = EventType.ADJUST.name, epochDay = today, quantity = diff, note = "Counted"))
-                        onDone("Set to ${unit.label(amount)}") { undo(id) }
+                        // Topping the stock up means it no longer needs buying.
+                        val restocked = diff > 0 && item.refillNeeded
+                        if (restocked) dao.clearRefill(item.id)
+                        onDone("Set to ${unit.label(amount)}") {
+                            undo(id)
+                            if (restocked) viewModelScope.launch { dao.item(item.id)?.let { dao.update(it.copy(refillNeeded = true)) } }
+                        }
                     }
                 }
             }

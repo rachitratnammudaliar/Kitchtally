@@ -28,6 +28,10 @@ class PantryTest {
         assertEquals(StockStatus.LOW, Pantry.status(listOf(bought(5, 2.0), used(1)), 1.0, today))
         assertEquals(StockStatus.OK, Pantry.status(listOf(bought(5, 3.0)), 1.0, today))
         assertEquals(StockStatus.OK, Pantry.status(listOf(bought(5, 1.0)), 0.0, today))
+        // Remind me at 0: heavy use never says "running low" while some is left.
+        val fast = listOf(bought(6, 4.0), used(5, 1.0), used(3, 1.0), used(1, 1.0))
+        assertEquals(StockStatus.LOW, Pantry.status(fast, 0.5, today))
+        assertEquals(StockStatus.OK, Pantry.status(fast, 0.0, today))
     }
 
     @Test

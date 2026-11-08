@@ -471,9 +471,15 @@ final class Store: ObservableObject {
             let diff = Qty.round(amount - current)
             guard diff != 0 else { return nil }
             appendEvent(Event(itemId: item.id, type: EventType.ADJUST.rawValue, epochDay: Day.today().epochDay, quantity: diff, note: "Counted"))
-            persist()
             let id = nextEventId - 1
-            return ("Set to \(unit.label(amount))", { self.deleteEvent(id) })
+            // Topping the stock up means it no longer needs buying.
+            let restocked = diff > 0 && item.refillNeeded
+            if restocked { clearRefill(item.id) }
+            persist()
+            return ("Set to \(unit.label(amount))", {
+                self.deleteEvent(id)
+                if restocked { self.items = self.items.map { i in var c = i; if i.id == item.id { c.refillNeeded = true }; return c }; self.persist() }
+            })
         }
     }
 

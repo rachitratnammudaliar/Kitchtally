@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+**Fixed**
+- "Remind me at 0" now means only when it's gone. Before, an item you use fast (like bread) could still show on the shopping list with 1 left because it guessed you'd run out in 2 days
+- Setting the stock yourself (Count / Set) now removes the item from the shopping list if it was marked as needing a refill
+
 ## 1.4.0
 
 **New**

@@ -451,6 +451,8 @@ enum Pantry {
         }
         if !(c.lowInMeals && c.countsMeals) && s <= c.lowAt { return .low }
         if c.unit.isLevel || c.countsMeals { return .ok }
+        // "Remind me at 0" means only when it's gone: no guessing from how fast you use it.
+        if c.lowAt <= 0 { return .ok }
         if let left = daysLeft(entries, today), left <= 2 { return .low }
         return .ok
     }

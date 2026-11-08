@@ -20,6 +20,9 @@ final class KitchtallyTests: XCTestCase {
 
     func testStatus() {
         XCTAssertEqual(Pantry.status([bought(5), used(1)], lowAt: 1, today), .out)
+        let fast = [bought(6, 4), used(5, 1), used(3, 1), used(1, 1)]
+        XCTAssertEqual(Pantry.status(fast, lowAt: 0.5, today), .low)
+        XCTAssertEqual(Pantry.status(fast, lowAt: 0, today), .ok)
         XCTAssertEqual(Pantry.status([bought(5, 2), used(1)], lowAt: 1, today), .low)
         XCTAssertEqual(Pantry.status([bought(5, 3)], lowAt: 1, today), .ok)
         XCTAssertEqual(Pantry.status([bought(5, 1)], lowAt: 0, today), .ok)

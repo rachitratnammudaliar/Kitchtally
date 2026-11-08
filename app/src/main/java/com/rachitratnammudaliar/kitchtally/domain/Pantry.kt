@@ -399,7 +399,7 @@ object Pantry {
      * Out at zero. When counting meals: red (LAST) with one meal or less left. Low at or below
      * "running low at", in meals or in the item's unit. Items counted in pieces, packets or kilos
      * are also low when they'll likely run out within 2 days; % and meal items only by their own
-     * threshold, so they don't nag early.
+     * threshold, so they don't nag early. A "running low at" of 0 turns the guessing off too.
      */
     fun status(entries: List<Entry>, counting: Counting, today: LocalDate): StockStatus {
         val stock = stock(entries)
@@ -411,6 +411,8 @@ object Pantry {
         }
         if (!(counting.lowInMeals && counting.countsMeals) && stock <= counting.lowAt) return StockStatus.LOW
         if (counting.unit.isLevel || counting.countsMeals) return StockStatus.OK
+        // "Remind me at 0" means only when it's gone: no guessing from how fast you use it.
+        if (counting.lowAt <= 0) return StockStatus.OK
         val left = daysLeft(entries, today)
         if (left != null && left <= 2) return StockStatus.LOW
         return StockStatus.OK
