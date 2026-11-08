@@ -11,6 +11,7 @@ struct ShoppingView: View {
     @State private var info: String?
     /// Items ticked while shopping, for "Done shopping".
     @State private var ticked = Set<Int64>()
+    @State private var askNewWeek = false
 
     private func add() {
         let text = newText.trimmingCharacters(in: .whitespaces)
@@ -104,6 +105,9 @@ struct ShoppingView: View {
                         let items = tickedNow
                         ticked.removeAll()
                         if let result = store.doneShopping(items) { showUndo($undo, result.0, result.1) }
+                        // Late in the week? Offer to start the new week, so this shop counts in it.
+                        let weekStart = Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor)
+                        if today.epochDay - weekStart.epochDay >= 5 { askNewWeek = true }
                     } label: {
                         Label("Done shopping · \(tickedNow.count)", systemImage: "checkmark").frame(maxWidth: .infinity)
                     }
@@ -115,6 +119,12 @@ struct ShoppingView: View {
             .navigationDestination(for: Int64.self) { id in ItemView(id: id, today: today) }
             .sheet(item: $buying) { target in PurchaseView(target: target, today: today) }
             .undoOverlay($undo)
+            .alert("Start the new week now?", isPresented: $askNewWeek) {
+                Button("Start") { store.startNewWeek(today) }
+                Button("Not now", role: .cancel) {}
+            } message: {
+                Text("Today's shop will count in the new week.")
+            }
         }
     }
 
@@ -185,11 +195,10 @@ struct WeekView: View {
     let today: Day
     @State private var offset = 0
     @State private var path: [Int64] = []
-    @State private var moved: [Int64] = []
+    @State private var undoAnchor: Int? = nil
 
     var body: some View {
-        let start = Pantry.weekStart(today, first: store.weekStartDay).plusDays(-7 * offset)
-        let todays = store.todaysPurchases(today).count
+        let start = Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor).plusDays(-7 * offset)
         let byItem = store.entriesByItem
         let categoryOf: (Int64) -> String = { id in store.item(id)?.category ?? "Other" }
         let week = Pantry.week(start, byItem, categoryOf: categoryOf, isLong: { store.isLong($0) })
@@ -210,15 +219,15 @@ struct WeekView: View {
                     }
                 }
 
-                if offset == 0 && (todays > 0 || !moved.isEmpty) {
+                if offset == 0 {
                     Section {
-                        if moved.isEmpty {
-                            Text("Bought \(todays) thing\(todays == 1 ? "" : "s") today for next week?").font(.subheadline)
-                            Button("Count today's shop in next week") { moved = store.moveTodaysPurchasesToNextWeek(today) }
-                                .buttonStyle(.borderedProminent)
+                        if let old = undoAnchor {
+                            Text("New week started today. Everything from today counts in it.").font(.subheadline)
+                            Button("Undo") { store.setWeekAnchor(old); undoAnchor = nil }
                         } else {
-                            Text("Moved \(moved.count) purchase\(moved.count == 1 ? "" : "s") to next week. They now count there.").font(.subheadline)
-                            Button("Undo") { store.countOnTheDay(moved); moved = [] }
+                            Text("Bought your shop for the new week? Start it now and today counts in it.").font(.subheadline)
+                            Button("Start new week") { undoAnchor = store.startNewWeek(today) }
+                                .buttonStyle(.borderedProminent)
                         }
                     }
                 }
@@ -270,9 +279,7 @@ struct WeekView: View {
                     Section {
                         ForEach(week.longItems, id: \.itemId) { w in
                             if let item = store.item(w.itemId) {
-                                let unit = item.unitValue
-                                let text = [w.bought > 0 ? "Bought \(unit.label(w.bought))" : nil, w.used > 0 ? "Used \(unit.label(w.used))" : nil]
-                                    .compactMap { $0 }.joined(separator: " · ")
+                                let text = w.bought > 0 ? "Bought \(item.unitValue.label(w.bought))" : "In use"
                                 weekRow(item, text, store.showSpending && w.spentMinor > 0 ? Money.format(w.spentMinor, store.currency) : nil)
                             }
                         }
@@ -294,7 +301,7 @@ struct WeekView: View {
                     Section("Spent") {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(Money.format(week.spentMinor, store.currency)).font(.system(size: 30, weight: .semibold, design: .rounded))
-                            if week.spentMinor > 0 || previous.spentMinor > 0 {
+                            if previous.spentMinor > 0 {
                                 Text(diff > 0 ? "\(Money.format(diff, store.currency)) more than the week before"
                                      : diff < 0 ? "\(Money.format(-diff, store.currency)) less than the week before" : "Same as the week before")
                                     .font(.caption).foregroundColor(.secondary)
@@ -420,6 +427,19 @@ struct SettingsView: View {
                     if let message = message { Text(message).font(.footnote).foregroundColor(.secondary) }
                 } header: {
                     Text("Backup")
+                }
+
+                Section {
+                    let info = Bundle.main.infoDictionary
+                    let version = (info?["CFBundleShortVersionString"] as? String) ?? ""
+                    ShareLink(item: "Kitchtally \(version)\niOS \(UIDevice.current.systemVersion), \(UIDevice.current.model)\n\nWhat happened:\n",
+                              subject: Text("Kitchtally problem")) {
+                        Label("Report a problem", systemImage: "exclamationmark.bubble")
+                    }
+                } header: {
+                    Text("Something wrong?")
+                } footer: {
+                    Text("Sends nothing by itself. It opens your share menu with the app version and your iPhone model, so you can send it to the developer.")
                 }
 
                 Section("Privacy") {

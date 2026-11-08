@@ -79,7 +79,7 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 **Weekly** (seven days from the day you choose, Monday by default)
 - Opens with what's **new this week**: what you bought and what you used
 - **Money stays out of sight** until you tap Show spending. Then: spent this week, compared with the week before, by category, and an optional monthly budget
-- **Count today's shop in next week:** one tap on Weekly, or set Counts in on any purchase
+- **Start new week:** one tap on Weekly. Today becomes day one, so a shop you did on the last day counts in the new week
 - **Long-lasting things** (face cream, perfume, dishwashing liquid) have their own section, outside the weekly lists
 - Go back to any earlier week
 

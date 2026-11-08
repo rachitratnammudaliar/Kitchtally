@@ -125,6 +125,25 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             Hint("Only shown on Weekly, under Show spending. Leave it empty to turn it off.")
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionLabel("Something wrong?")
+            Text(
+                "Sends nothing by itself. It opens your share menu with the app version, your phone model and the last error, so you can send it to the developer.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            FilledTonalButton(onClick = {
+                val error = runCatching { java.io.File(context.filesDir, com.rachitratnammudaliar.kitchtally.KitchtallyApp.ERROR_FILE).takeIf { it.exists() }?.readText() }.getOrNull()
+                val report = buildString {
+                    appendLine("Kitchtally $version")
+                    appendLine("Android ${android.os.Build.VERSION.RELEASE}, ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+                    appendLine(if (error.isNullOrBlank()) "No crash recorded." else "Last crash:\n${error.take(3000)}")
+                    appendLine("\nWhat happened:")
+                }
+                val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_SUBJECT, "Kitchtally problem").putExtra(android.content.Intent.EXTRA_TEXT, report)
+                runCatching { context.startActivity(android.content.Intent.createChooser(send, "Report a problem")) }
+            }) { Text("Report a problem") }
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Backup")
             Text(
                 "Save your items and history to a file you keep, and restore them on a new phone, Android or iPhone. Photos aren't included.",

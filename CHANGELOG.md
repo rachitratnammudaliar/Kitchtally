@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.0
+
+**New**
+- **Use part of one:** for packets, bottles and tubes, the Use box has **25% · 50% · 75% · All** and an **Other %** field. No more typing 0.5
+- **Amounts read like people say them:** "½ packet left", "1½ packets", "Used a little", never 0.75 or 0.1
+- **Start new week:** a button on Weekly. Today becomes day one of the new week, so a shop you do on the last day counts in the new week. After **Done shopping** late in the week, the app offers it. Undo is one tap
+- **Report a problem** in Settings: opens your share menu with the app version, your phone model and the last error. Nothing is sent by itself
+
+**Changed**
+- Long-lasting things (face cream, perfume, dishwashing liquid) show only what you paid, in their own small section on Weekly
+- The Spent card only says "more than the week before" when there was a week before
+- The bars in the Spent card are plain bars again
+- The "Counts in" setting on purchases is gone; Start new week replaces it
+
 ## 1.5.1
 
 **Fixed**

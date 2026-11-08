@@ -9,6 +9,9 @@ struct AdjustSheet: View {
 
     @State private var inPacks = false
     @State private var text = "1"
+    @State private var percentText = ""
+
+    private var percentValue: Int? { Int(percentText.trimmingCharacters(in: .whitespaces)).flatMap { (1...1000).contains($0) ? $0 : nil } }
 
     private var value: Double? {
         guard let v = Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")), v >= 0, v <= 10_000 else { return nil }
@@ -21,6 +24,11 @@ struct AdjustSheet: View {
     private func run(_ action: Store.Adjust) {
         guard let a = amount else { return }
         if let result = store.adjust(item, action, a) { onDone(result.0, result.1) }
+        dismiss()
+    }
+
+    private func runUsed(_ amount: Double) {
+        if let result = store.adjust(item, .used, amount) { onDone(result.0, result.1) }
         dismiss()
     }
 
@@ -56,6 +64,20 @@ struct AdjustSheet: View {
                         Button("+2") { step(2) }.buttonStyle(.bordered)
                     }
                     if inPacks, let a = amount { Text("= \(unit.label(a))").font(.caption).foregroundColor(.secondary) }
+                }
+                if !unit.byWeight && stock > 0 {
+                    Section("Used part of one") {
+                        HStack(spacing: 6) {
+                            ForEach([25, 50, 75, 100], id: \.self) { p in
+                                Button(p == 100 ? "All" : "\(p)%") { runUsed(Double(p) / 100) }
+                                    .buttonStyle(.bordered).frame(maxWidth: .infinity)
+                            }
+                        }
+                        HStack {
+                            TextField("Other %", text: $percentText).keyboardType(.numberPad)
+                            Button("Used") { runUsed(Double(percentValue ?? 0) / 100) }.disabled(percentValue == nil)
+                        }
+                    }
                 }
                 Section {
                     let ok = (amount ?? 0) > 0

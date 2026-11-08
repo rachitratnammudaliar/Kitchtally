@@ -64,7 +64,14 @@ enum QtyUnit: String, CaseIterable, Identifiable {
 
     /// An amount: "2 packets", "500 g", and for % items "25%", "1 full", "1 full + 50%".
     func label(_ qty: Double) -> String {
-        guard isLevel else { return "\(Qty.format(qty)) \(qty == 1 ? singular : plural)" }
+        guard isLevel else {
+            if !byWeight {
+                // People say "half a packet" and "a little", not 0.5 or 0.1.
+                if qty > 0 && qty < 0.2 { return "a little" }
+                if let f = Qty.fraction(qty) { return "\(f) \(qty <= 1 ? singular : plural)" }
+            }
+            return "\(Qty.format(qty)) \(qty == 1 ? singular : plural)"
+        }
         let whole = Int((Qty.round(qty) + 1e-9).rounded(.down))
         let pct = Qty.percent(qty - Double(whole))
         if whole == 0 { return "\(pct)%" }
@@ -278,6 +285,17 @@ enum Shops {
 enum Qty {
     static func round(_ q: Double) -> Double { (q * 1000).rounded() / 1000 }
 
+    /// ¼ ½ ¾ and "1½", for amounts that are a whole number plus a quarter, half or three quarters. Nil otherwise.
+    static func fraction(_ q: Double) -> String? {
+        let nearest = (q * 4).rounded() / 4
+        if abs(q - nearest) > 0.02 || nearest <= 0 { return nil }
+        let whole = Int(nearest.rounded(.down))
+        let rest = nearest - Double(whole)
+        let symbol: String
+        if rest == 0.25 { symbol = "¼" } else if rest == 0.5 { symbol = "½" } else if rest == 0.75 { symbol = "¾" } else { return nil }
+        return whole == 0 ? symbol : "\(whole)\(symbol)"
+    }
+
     /// 0.8 -> 80.
     static func percent(_ fraction: Double) -> Int { Int((fraction * 100).rounded(.toNearestOrAwayFromZero)) }
 
@@ -469,7 +487,11 @@ enum Pantry {
     }
 
     /// First day of the week [day] is in. [first] is 1 for Monday up to 7 for Sunday. 1 January 1970 was a Thursday.
-    static func weekStart(_ day: Day, first: Int = 1) -> Day {
+    /// After "Start new week", weeks run seven days from [anchor] (the day you pressed it); before that, from the chosen [first] day.
+    static func weekStart(_ day: Day, first: Int = 1, anchor: Day? = nil) -> Day {
+        if let a = anchor, !(day < a) {
+            return a.plusDays((day.epochDay - a.epochDay) / 7 * 7)
+        }
         let index = ((day.epochDay + 3 - (first - 1)) % 7 + 7) % 7
         return day.plusDays(-index)
     }

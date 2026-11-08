@@ -139,6 +139,11 @@ class Prefs(context: Context) {
         get() = prefs.getInt("week_start_day", 1).coerceIn(1, 7)
         set(value) = prefs.edit().putInt("week_start_day", value.coerceIn(1, 7)).apply()
 
+    /** The day you pressed "Start new week" (epoch day); 0 = never. Weeks run seven days from it. */
+    var weekAnchorDay: Long
+        get() = prefs.getLong("week_anchor_day", 0L)
+        set(value) = prefs.edit().putLong("week_anchor_day", value).apply()
+
     /** "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off. */
     var forNextWeekUntil: Long
         get() = prefs.getLong("for_next_week_until", 0L)

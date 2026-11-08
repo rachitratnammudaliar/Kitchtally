@@ -259,8 +259,8 @@ final class Store: ObservableObject {
     @Published var weekStartDay: Int {
         didSet {
             UserDefaults.standard.set(weekStartDay, forKey: "week_start_day")
-            // The old switch was worked out for the old week.
-            if oldValue != weekStartDay { setForNextWeek(false) }
+            // Choosing a first day starts the weeks over from that day, and the old switch was worked out for the old week.
+            if oldValue != weekStartDay { setWeekAnchor(0); setForNextWeek(false) }
         }
     }
     /// "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off.
@@ -410,26 +410,22 @@ final class Store: ObservableObject {
         events.append(copy)
     }
 
-    /// Today's purchases that still count in this week.
-    func todaysPurchases(_ today: Day) -> [Int64] {
-        events.filter { $0.typeValue == .BOUGHT && $0.epochDay == today.epochDay && $0.countsFromDay == nil }.map(\.id)
+    /// The day "Start new week" was pressed (epoch day), or 0. Weeks run seven days from it.
+    @Published private(set) var weekAnchorDay: Int = UserDefaults.standard.integer(forKey: "week_anchor_day")
+
+    var weekAnchor: Day? { weekAnchorDay > 0 ? Day(epochDay: weekAnchorDay) : nil }
+
+    func setWeekAnchor(_ day: Int) {
+        weekAnchorDay = day
+        UserDefaults.standard.set(day, forKey: "week_anchor_day")
     }
 
-    /// Makes today's purchases count in next week. Returns their ids, for Undo.
+    /// Today becomes day one of a new week. Returns the old anchor, for Undo.
     @discardableResult
-    func moveTodaysPurchasesToNextWeek(_ today: Day) -> [Int64] {
-        let ids = Set(todaysPurchases(today))
-        guard !ids.isEmpty else { return [] }
-        let next = Pantry.weekStart(today, first: weekStartDay).plusDays(7).epochDay
-        events = events.map { e in var c = e; if ids.contains(e.id) { c.countsFromDay = next }; return c }
-        persist()
-        return Array(ids)
-    }
-
-    func countOnTheDay(_ ids: [Int64]) {
-        let set = Set(ids)
-        events = events.map { e in var c = e; if set.contains(e.id) { c.countsFromDay = nil }; return c }
-        persist()
+    func startNewWeek(_ today: Day) -> Int {
+        let before = weekAnchorDay
+        setWeekAnchor(today.epochDay)
+        return before
     }
 
     /// Face cream, toilet paper, shower gel and the like are counted in Budget, not in the weekly shop.

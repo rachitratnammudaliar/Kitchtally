@@ -39,7 +39,14 @@ enum class QtyUnit(
 
     /** An amount: "2 packets", "500 g", and for % items "25%", "1 full", "1 full + 50%". */
     fun label(qty: Double): String {
-        if (!isLevel) return "${Qty.format(qty)} ${if (qty == 1.0) singular else plural}"
+        if (!isLevel) {
+            if (!byWeight) {
+                // People say "half a packet" and "a little", not 0.5 or 0.1.
+                if (qty > 0 && qty < 0.2) return "a little"
+                Qty.fraction(qty)?.let { return "$it ${if (qty <= 1.0) singular else plural}" }
+            }
+            return "${Qty.format(qty)} ${if (qty == 1.0) singular else plural}"
+        }
         val whole = Math.floor(Qty.round(qty) + 1e-9).toInt()
         val pct = Qty.percent(qty - whole)
         return when {
@@ -242,6 +249,20 @@ object Qty {
     /** 0.8 -> 80. */
     fun percent(fraction: Double): Int = BigDecimal.valueOf(fraction).movePointRight(2).setScale(0, RoundingMode.HALF_UP).toInt()
 
+    /** ¼ ½ ¾ and "1½", for amounts that are a whole number plus a quarter, half or three quarters. Null otherwise. */
+    fun fraction(q: Double): String? {
+        val nearest = Math.round(q * 4) / 4.0
+        if (Math.abs(q - nearest) > 0.02 || nearest <= 0) return null
+        val whole = Math.floor(nearest).toInt()
+        val symbol = when (nearest - whole) {
+            0.25 -> "¼"
+            0.5 -> "½"
+            0.75 -> "¾"
+            else -> return null
+        }
+        return if (whole == 0) symbol else "$whole$symbol"
+    }
+
     fun format(q: Double): String =
         BigDecimal.valueOf(round(q)).stripTrailingZeros().toPlainString().let { if (it == "-0") "0" else it }
 
@@ -428,7 +449,17 @@ object Pantry {
         return ChronoUnit.DAYS.between(last.date, today) > life.freshDays
     }
 
-    fun weekStart(day: LocalDate, first: DayOfWeek = DayOfWeek.MONDAY): LocalDate = day.with(TemporalAdjusters.previousOrSame(first))
+    /**
+     * First day of the week [day] is in. After "Start new week", weeks run seven days from [anchor]
+     * (the day you pressed it); before that, from the chosen [first] day of the week.
+     */
+    fun weekStart(day: LocalDate, first: DayOfWeek = DayOfWeek.MONDAY, anchor: LocalDate? = null): LocalDate {
+        if (anchor != null && !day.isBefore(anchor)) {
+            val weeks = ChronoUnit.DAYS.between(anchor, day) / 7
+            return anchor.plusWeeks(weeks)
+        }
+        return day.with(TemporalAdjusters.previousOrSame(first))
+    }
 
     data class ItemWeek(val itemId: Long, val used: Double, val shared: Double, val bought: Double, val spentMinor: Long)
 

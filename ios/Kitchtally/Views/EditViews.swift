@@ -402,13 +402,6 @@ struct PurchaseView: View {
                     if showErrors && qty == nil { Text("Enter an amount above 0").font(.caption).foregroundColor(.red) }
                     if packMode, let q = qty { Text("= \(unit.label(q))").font(.caption).foregroundColor(.secondary) }
                     DatePicker("Bought on", selection: $date, in: ...Date(), displayedComponents: .date)
-                    Picker("Counts in", selection: $nextWeek) {
-                        Text("This week").tag(false)
-                        Text("Next week").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    Text("A shop for next week stays in your pantry now, but shows in next week's summary and spending.")
-                        .font(.caption).foregroundColor(.secondary)
                 }
 
                 Section("Price (optional)") {

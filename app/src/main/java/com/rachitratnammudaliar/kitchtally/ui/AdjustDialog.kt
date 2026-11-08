@@ -36,6 +36,8 @@ fun AdjustDialog(item: Item, stock: Double, onDismiss: () -> Unit, onAction: (Pa
     val packs = item.packSize > 0
     var inPacks by rememberSaveable { mutableStateOf(false) }
     var text by rememberSaveable { mutableStateOf("1") }
+    var percentText by rememberSaveable { mutableStateOf("") }
+    val percentValue = percentText.trim().toIntOrNull()?.takeIf { it in 1..1000 }
     val value = text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it <= 10_000 }
     val amount = value?.let { Qty.round(if (inPacks) it * item.packSize else it) }
     fun step(by: Double) {
@@ -74,6 +76,20 @@ fun AdjustDialog(item: Item, stock: Double, onDismiss: () -> Unit, onAction: (Pa
                     OutlinedButton(onClick = { step(2.0) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp), modifier = Modifier.width(48.dp)) { Text("+2") }
                 }
                 if (inPacks && amount != null) Hint("= ${unit.label(amount)}")
+                if (!unit.byWeight && stock > 0) {
+                    SectionLabel("Used part of one")
+                    ChipRow(listOf(25, 50, 75, 100), null, { if (it == 100) "All" else "$it%" }, { onAction(PantryViewModel.Adjust.USED, it / 100.0) })
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NumberField(
+                            value = percentText,
+                            onChange = { percentText = it.filter { c -> c.isDigit() }.take(4) },
+                            label = "Other %",
+                            isError = percentText.isNotBlank() && percentValue == null,
+                            modifier = Modifier.weight(1f),
+                        )
+                        FilledTonalButton(onClick = { onAction(PantryViewModel.Adjust.USED, (percentValue ?: 0) / 100.0) }, enabled = percentValue != null) { Text("Used") }
+                    }
+                }
                 val ok = amount != null && amount > 0
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     OutlinedButton(onClick = { onAction(PantryViewModel.Adjust.USED, amount ?: 0.0) }, enabled = ok && stock > 0, modifier = Modifier.weight(1f)) { Text("Used") }

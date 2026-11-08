@@ -35,6 +35,7 @@ shot() {
   echo "Saved $OUT/$name.png"
 }
 
+adb logcat -c || true
 adb shell cmd uimode night no
 shot pantry home
 shot item:6 item
@@ -49,3 +50,10 @@ adb shell cmd uimode night yes
 sleep 2
 shot pantry home-dark
 adb shell cmd uimode night no
+
+# A crash in any screen fails the build, so it never reaches a release.
+if adb logcat -d | grep -q "FATAL EXCEPTION.*" ; then
+  adb logcat -d | grep -B2 -A25 "FATAL EXCEPTION" | head -80
+  echo "The app crashed while taking screenshots." >&2
+  exit 1
+fi
