@@ -76,9 +76,10 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - **Not now** hides an item until you next buy it; **Not sure to buy again** keeps it off the list for good
 - An estimate of the total at last prices
 
-**Weekly** (Monday to Sunday)
+**Weekly** (seven days from the day you choose, Monday by default)
 - Opens with what's **new this week**: what you bought and what you used
 - **Money stays out of sight** until you tap Show spending. Then: spent this week, compared with the week before, by category, and an optional monthly budget
+- **Shopping for next week:** switch it on before you log a shop and it counts in next week; you can also move any purchase to next week
 - Go back to any earlier week
 
 **Home screen widget** (Android): how many things are on your To buy list and what's almost out. Tap it to open the list.
