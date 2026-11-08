@@ -1,10 +1,14 @@
 # Changelog
 
-## 1.5.0
+## 1.5.1
 
-**New**
-- **Budget tab:** spending month by month, with everyday shopping and long-lasting things apart. Your monthly budget applies to everyday shopping
-- **Long-lasting things** (Personal care and Household: face cream, toilet paper, shower gel) are no longer part of the weekly shop. Weekly lists them in their own section, and Budget shows what they cost each month and what you bought
+**Fixed**
+- Crash when opening the Budget tab. The tab is gone: it was bigger than needed
+
+**Changed**
+- **Long-lasting things** (Personal care and Household: face cream, perfume, dishwashing liquid, toilet paper) no longer show in the weekly Bought, Used and Spent lists. They have their own small section at the bottom of Weekly, with what you bought and used, and what they cost this month
+- The big "Shopping for next week" switch on Pantry and To buy is gone. To count a shop in next week, use **Count today's shop in next week** on Weekly, or set **Counts in** on a purchase
+- Perfume, cologne and body spray are filed under Personal care
 
 ## 1.4.2
 

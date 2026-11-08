@@ -183,7 +183,7 @@ object Suggestions {
         listOf("sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper") to s("Household", QtyUnit.PACKET, Life.LONG),
         listOf("dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach") to s("Household", QtyUnit.LEVEL, Life.LONG),
         listOf("toothbrush", "razor", "shaving", "sanitary", "pads", "cotton") to s("Personal care", QtyUnit.PIECE, Life.LONG),
-        listOf("body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "hair oil", "hair gel") to s("Personal care", QtyUnit.LEVEL, Life.LONG),
+        listOf("body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "perfume", "cologne", "fragrance", "body spray", "hair oil", "hair gel") to s("Personal care", QtyUnit.LEVEL, Life.LONG),
         listOf("sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto") to s("Sauces & spreads", QtyUnit.LEVEL, Life.LONG),
         listOf("veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint") to s("Vegetables", QtyUnit.LEVEL, Life.MEDIUM, meals = true),
         listOf("chilli powder", "chili powder", "chilli flakes", "chili flakes") to s("Spices", QtyUnit.LEVEL, Life.LONG),
@@ -471,10 +471,8 @@ object Pantry {
             if (week.used == 0.0 && week.bought == 0.0) null else week
         }
         // Long-lasting things (face cream, toilet paper) are counted in Budget, not in the weekly shop.
-        val longItems = all.filter { isLong(it.itemId) && it.bought > 0 }.sortedByDescending { it.spentMinor }
-        val items = all.mapNotNull { w ->
-            if (!isLong(w.itemId)) w else w.copy(bought = 0.0, spentMinor = 0).takeIf { it.used > 0 }
-        }
+        val longItems = all.filter { isLong(it.itemId) }.sortedWith(compareByDescending<ItemWeek> { it.spentMinor }.thenByDescending { it.used })
+        val items = all.filter { !isLong(it.itemId) }
         val timesShared = entriesByItem.values.sumOf { entries ->
             entries.count { it.type == EventType.SHARED && !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }
         }

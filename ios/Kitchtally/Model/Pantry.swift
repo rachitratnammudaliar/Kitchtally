@@ -221,7 +221,7 @@ enum Suggestions {
         (["sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach"], Suggestion(category: "Household", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["toothbrush", "razor", "shaving", "sanitary", "pads", "cotton"], Suggestion(category: "Personal care", unit: .PIECE, life: .LONG, packSize: 0, countMeals: false)),
-        (["body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "hair oil", "hair gel"], Suggestion(category: "Personal care", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["body wash", "shower gel", "soap", "shampoo", "conditioner", "toothpaste", "mouthwash", "face wash", "facewash", "cleanser", "body cream", "face cream", "hand cream", "night cream", "day cream", "lotion", "moisturiser", "moisturizer", "sunscreen", "deodorant", "deo", "lip balm", "perfume", "cologne", "fragrance", "body spray", "hair oil", "hair gel"], Suggestion(category: "Personal care", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["sauce", "puree", "purée", "ketchup", "mayo", "mayonnaise", "jam", "pickle", "achar", "chutney", "dressing", "honey", "peanut butter", "nutella", "spread", "tomato paste", "ginger garlic paste", "salsa", "pesto"], Suggestion(category: "Sauces & spreads", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["veggie", "vegetable", "frozen mix", "mushroom", "spinach", "salad", "lettuce", "herbs", "coriander leaves", "mint"], Suggestion(category: "Vegetables", unit: .LEVEL, life: .MEDIUM, packSize: 0, countMeals: true)),
         (["chilli powder", "chili powder", "chilli flakes", "chili flakes"], Suggestion(category: "Spices", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
@@ -517,12 +517,8 @@ enum Pantry {
             all.append(w)
         }
         // Long-lasting things (face cream, toilet paper) are counted in Budget, not in the weekly shop.
-        let longItems = all.filter { isLong($0.itemId) && $0.bought > 0 }.sorted { $0.spentMinor > $1.spentMinor }
-        var items: [ItemWeek] = []
-        for w in all {
-            if !isLong(w.itemId) { items.append(w) }
-            else if w.used > 0 { items.append(ItemWeek(itemId: w.itemId, used: w.used, shared: w.shared, bought: 0, spentMinor: 0)) }
-        }
+        let longItems = all.filter { isLong($0.itemId) }.sorted { $0.spentMinor != $1.spentMinor ? $0.spentMinor > $1.spentMinor : $0.used > $1.used }
+        var items = all.filter { !isLong($0.itemId) }
         let timesShared = entriesByItem.values.reduce(0) { sum, entries in
             sum + entries.filter { $0.type == .SHARED && !($0.weekDate < start) && !($0.weekDate > end) }.count
         }

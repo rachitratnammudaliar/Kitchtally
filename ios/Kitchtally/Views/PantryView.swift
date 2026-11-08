@@ -17,7 +17,6 @@ struct PantryView: View {
         NavigationStack(path: $path) {
             List {
                 summary
-                ForNextWeekSection(today: today)
                 if store.items.isEmpty {
                     Section {
                         VStack(spacing: 10) {

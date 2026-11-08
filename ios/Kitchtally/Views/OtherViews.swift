@@ -30,7 +30,6 @@ struct ShoppingView: View {
 
         NavigationStack(path: $path) {
             List {
-                ForNextWeekSection(today: today)
                 Section {
                     HStack {
                         TextField("Add something to buy", text: $newText)
@@ -271,13 +270,18 @@ struct WeekView: View {
                     Section {
                         ForEach(week.longItems, id: \.itemId) { w in
                             if let item = store.item(w.itemId) {
-                                weekRow(item, "Bought \(item.unitValue.label(w.bought))", store.showSpending && w.spentMinor > 0 ? Money.format(w.spentMinor, store.currency) : nil)
+                                let unit = item.unitValue
+                                let text = [w.bought > 0 ? "Bought \(unit.label(w.bought))" : nil, w.used > 0 ? "Used \(unit.label(w.used))" : nil]
+                                    .compactMap { $0 }.joined(separator: " · ")
+                                weekRow(item, text, store.showSpending && w.spentMinor > 0 ? Money.format(w.spentMinor, store.currency) : nil)
                             }
                         }
                     } header: {
-                        Text("Long-lasting · counted in Budget")
+                        Text("Long-lasting things")
                     } footer: {
-                        Text("Face cream, toilet paper, shower gel and other non-food things last a month or more, so they're not in this week's totals. See the Budget tab.")
+                        let monthLong = Pantry.month(today.firstOfMonth, byItem, categoryOf: categoryOf, isLong: { store.isLong($0) }).longMinor
+                        Text("Face cream, perfume, dishwashing liquid and other things that last a month or more are kept out of the lists above."
+                             + (store.showSpending && monthLong > 0 ? " Spent on them this month: \(Money.format(monthLong, store.currency))." : ""))
                     }
                 }
 
@@ -388,7 +392,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Week")
                 } footer: {
-                    Text("The Weekly tab counts seven days from this day. To count a shop for next week, switch on Shopping for next week before you log it.")
+                    Text("The Weekly tab counts seven days from this day. To count a shop in next week, use the button on Weekly.")
                 }
 
                 Section {

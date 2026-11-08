@@ -317,7 +317,6 @@ private fun MainTabs(
                         when (tab) {
                             "shopping" -> "Shopping list"
                             "week" -> "This week"
-                            "budget" -> "Budget"
                             else -> "Kitchtally"
                         },
                         fontWeight = FontWeight.SemiBold,
@@ -333,12 +332,6 @@ private fun MainTabs(
                     IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
                 },
             )
-            if (tab == "pantry" || tab == "shopping") {
-                val forNextUntil by vm.forNextWeekUntil.collectAsStateWithLifecycle()
-                Column(Modifier.padding(horizontal = 16.dp)) {
-                    SwitchRow("Shopping for next week", "Things you buy now count in next week's summary", forNextUntil > today.toEpochDay()) { vm.setForNextWeek(it) }
-                }
-            }
           }
         },
         bottomBar = {
@@ -355,7 +348,6 @@ private fun MainTabs(
                     label = { Text("To buy") },
                 )
                 NavigationBarItem(selected = tab == "week", onClick = { onTab("week") }, icon = { Icon(Icons.Default.DateRange, null) }, label = { Text("Weekly") })
-                NavigationBarItem(selected = tab == "budget", onClick = { onTab("budget") }, icon = { Text("💶") }, label = { Text("Budget") })
             }
         },
         floatingActionButton = {
@@ -380,7 +372,6 @@ private fun MainTabs(
         when (tab) {
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
-            "budget" -> BudgetScreen(vm, s, today, currency, onOpen, modifier)
             else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
         }
     }
@@ -879,14 +870,25 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
             }
         }
         if (week.longItems.isNotEmpty()) {
-            item(key = "long-title") { SectionLabel("Long-lasting · counted in Budget") }
+            item(key = "long-title") { SectionLabel("Long-lasting things") }
             week.longItems.forEach { w ->
                 val thing = state.item(w.itemId) ?: return@forEach
+                val unit = thing.unitValue()
+                val text = listOfNotNull(
+                    if (w.bought > 0) "Bought ${unit.label(w.bought)}" else null,
+                    if (w.used > 0) "Used ${unit.label(w.used)}" else null,
+                ).joinToString(" · ")
                 item(key = "l-${w.itemId}") {
-                    WeekRow(thing, "Bought ${thing.unitValue().label(w.bought)}", if (showSpending && w.spentMinor > 0) Money.format(w.spentMinor, currency) else null) { onOpen(thing.id) }
+                    WeekRow(thing, text, if (showSpending && w.spentMinor > 0) Money.format(w.spentMinor, currency) else null) { onOpen(thing.id) }
                 }
             }
-            item(key = "long-hint") { Hint("Face cream, toilet paper, shower gel and other non-food things last a month or more, so they're not in this week's totals. See the Budget tab.") }
+            item(key = "long-hint") {
+                val monthLong = Pantry.month(today.withDayOfMonth(1), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = categoryOf).longMinor
+                Hint(
+                    "Face cream, perfume, dishwashing liquid and other things that last a month or more are kept out of the lists above." +
+                        if (showSpending && monthLong > 0) " Spent on them this month: ${Money.format(monthLong, currency)}." else "",
+                )
+            }
         }
         // Money stays out of the way until you ask for it.
         item(key = "spending-toggle") {

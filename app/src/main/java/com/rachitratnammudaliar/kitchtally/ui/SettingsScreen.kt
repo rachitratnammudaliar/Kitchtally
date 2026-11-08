@@ -99,7 +99,7 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             SectionLabel("Week starts on")
             val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
             ChipRow((1..7).toList(), weekFirst, { DayOfWeek.of(it).getDisplayName(TextStyle.FULL, Locale.getDefault()) }, vm::setWeekStartDay)
-            Hint("The Weekly tab counts seven days from this day. To count a shop for next week, switch on Shopping for next week before you log it.")
+            Hint("The Weekly tab counts seven days from this day. To count a shop in next week, use the button on Weekly.")
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Spending")
