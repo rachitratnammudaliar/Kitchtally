@@ -89,6 +89,26 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertFalse(Categories.isLongLasting("Staples"))
     }
 
+    func testAmountsReadLikePeopleSayThem() {
+        XCTAssertEqual(QtyUnit.PACKET.label(0.5), "½ packet")
+        XCTAssertEqual(QtyUnit.PACKET.label(0.25), "¼ packet")
+        XCTAssertEqual(QtyUnit.PACKET.label(0.75), "¾ packet")
+        XCTAssertEqual(QtyUnit.PACKET.label(1.5), "1½ packets")
+        XCTAssertEqual(QtyUnit.PIECE.label(0.1), "a little")
+        XCTAssertEqual(QtyUnit.PACKET.label(2), "2 packets")
+        XCTAssertEqual(QtyUnit.KG.label(0.5), "0.5 kg")
+        XCTAssertEqual(QtyUnit.PACKET.leftLabel(0.5), "½ packet left")
+    }
+
+    func testStartingANewWeekMakesTodayDayOne() {
+        let sunday = Day(2026, 11, 8)
+        XCTAssertEqual(Pantry.weekStart(sunday), Day(2026, 11, 2))
+        XCTAssertEqual(Pantry.weekStart(sunday, anchor: sunday), sunday)
+        XCTAssertEqual(Pantry.weekStart(sunday.plusDays(6), anchor: sunday), sunday)
+        XCTAssertEqual(Pantry.weekStart(sunday.plusDays(7), anchor: sunday), sunday.plusDays(7))
+        XCTAssertEqual(Pantry.weekStart(Day(2026, 11, 7), anchor: sunday), Day(2026, 11, 2))
+    }
+
     func testWeekCanStartOnAnotherDay() {
         XCTAssertEqual(Pantry.weekStart(today, first: 7), Day(2026, 11, 1))
         XCTAssertEqual(Pantry.weekStart(today), Day(2026, 11, 2))

@@ -130,6 +130,33 @@ class PantryTest {
     }
 
     @Test
+    fun amountsReadLikePeopleSayThem() {
+        assertEquals("½ packet", QtyUnit.PACKET.label(0.5))
+        assertEquals("¼ packet", QtyUnit.PACKET.label(0.25))
+        assertEquals("¾ packet", QtyUnit.PACKET.label(0.75))
+        assertEquals("1½ packets", QtyUnit.PACKET.label(1.5))
+        assertEquals("a little", QtyUnit.PIECE.label(0.1))
+        assertEquals("2 packets", QtyUnit.PACKET.label(2.0))
+        assertEquals("0.5 kg", QtyUnit.KG.label(0.5))
+        assertEquals("½ packet left", QtyUnit.PACKET.leftLabel(0.5))
+    }
+
+    @Test
+    fun startingANewWeekMakesTodayDayOne() {
+        val sunday = LocalDate.of(2026, 11, 8)
+        assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(sunday))
+        assertEquals(sunday, Pantry.weekStart(sunday, anchor = sunday))
+        assertEquals(sunday, Pantry.weekStart(sunday.plusDays(6), anchor = sunday))
+        assertEquals(sunday.plusWeeks(1), Pantry.weekStart(sunday.plusDays(7), anchor = sunday))
+        // Days before the anchor keep the normal calendar weeks.
+        assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(LocalDate.of(2026, 11, 7), anchor = sunday))
+        // The shop bought on the day it starts counts in the new week.
+        val shop = listOf(Entry(EventType.BOUGHT, sunday, 1.0, 500, "IKI"))
+        assertEquals(0, Pantry.week(Pantry.weekStart(sunday.minusDays(1)), mapOf(1L to shop)) { "Other" }.itemsBought)
+        assertEquals(1, Pantry.week(Pantry.weekStart(sunday, anchor = sunday), mapOf(1L to shop)) { "Other" }.itemsBought)
+    }
+
+    @Test
     fun weekCanStartOnAnotherDay() {
         assertEquals(LocalDate.of(2026, 11, 1), Pantry.weekStart(today, java.time.DayOfWeek.SUNDAY))
         assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(today))

@@ -577,10 +577,6 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 Text("Bought on ${LocalDate.ofEpochDay(day).format(dateFormat)}")
             }
 
-            SectionLabel("Counts in")
-            ChipRow(listOf(false, true), nextWeek, { if (it) "Next week" else "This week" }, { nextWeek = it })
-            Hint("A shop for next week stays in your pantry now, but shows in next week's summary and spending.")
-
             SectionLabel("Price (optional)")
             val perLabel = if (packMode) "per pack" else unit.priceLabel
             ChipRow(listOf(false, true), perUnit, { if (it) "Price $perLabel" else "Total paid" }, { perUnit = it })

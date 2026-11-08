@@ -4,6 +4,7 @@
     <!-- No internet permission: Kitchtally never goes online. -->
 
     <application
+        android:name=".KitchtallyApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"

@@ -97,6 +97,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     fun setWeekStartDay(day: Int) {
         prefs.weekStartDay = day
         _weekStartDay.value = prefs.weekStartDay
+        // Choosing a first day starts the weeks over from that day.
+        setWeekAnchor(0L)
         // The old switch was worked out for the old week.
         setForNextWeek(false)
     }
@@ -111,23 +113,20 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _forNextWeekUntil.value = until
     }
 
-    /** Today's purchases that still count in this week. */
-    fun todaysPurchases(state: PantryState, today: LocalDate): List<Long> =
-        state.events.filter { it.type == EventType.BOUGHT.name && it.epochDay == today.toEpochDay() && it.countsFromDay == null }.map { it.id }
+    private val _weekAnchorDay = MutableStateFlow(prefs.weekAnchorDay)
+    /** The day "Start new week" was pressed (epoch day), or 0. */
+    val weekAnchorDay: StateFlow<Long> = _weekAnchorDay.asStateFlow()
 
-    /** Makes the purchases logged today count in next week. [onMoved] gets their ids, for Undo. */
-    fun moveTodaysPurchasesToNextWeek(state: PantryState, today: LocalDate, onMoved: (List<Long>) -> Unit) {
-        val ids = todaysPurchases(state, today)
-        if (ids.isEmpty()) return
-        val next = Pantry.weekStart(today, DayOfWeek.of(prefs.weekStartDay)).plusWeeks(1).toEpochDay()
-        viewModelScope.launch {
-            dao.setCountsFrom(ids, next)
-            onMoved(ids)
-        }
+    /** Today becomes day one of a new week. Returns the old anchor, for Undo. */
+    fun startNewWeek(today: LocalDate): Long {
+        val before = prefs.weekAnchorDay
+        setWeekAnchor(today.toEpochDay())
+        return before
     }
 
-    fun countOnTheDay(ids: List<Long>) {
-        viewModelScope.launch { dao.setCountsFrom(ids, null) }
+    fun setWeekAnchor(day: Long) {
+        prefs.weekAnchorDay = day
+        _weekAnchorDay.value = day
     }
 
     /** Where a purchase made right now should start counting, or null for this week. */
@@ -460,6 +459,10 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 ev(b, 6, 1.0, 129, "IKI"), ev(u, 5, 0.25), ev(u, 4, 0.25), ev(u, 3, 0.5), ev(b, 2, 1.0, 129, "IKI"), ev(u, 1, 0.25), ev(u, 0, 0.5))
             add("Milk", "Dairy & eggs", QtyUnit.LEVEL, Life.SHORT,
                 ev(b, 3, 1.0, 99, "Maxima"), ev(u, 2, 0.25), ev(u, 0, 0.25))
+            add("Face cream", "Personal care", QtyUnit.PIECE, Life.LONG,
+                ev(b, 2, 1.0, 1290, "Maxima"), ev(u, 1, 0.25))
+            add("Dishwashing liquid", "Household", QtyUnit.LEVEL, Life.LONG,
+                ev(b, 3, 1.0, 199, "IKI"), ev(u, 0, 0.1))
             add("Basmati rice", "Staples", QtyUnit.KG, Life.LONG,
                 ev(b, 20, 5.0, 1245, "Maxima"), ev(u, 15, 0.5), ev(u, 10, 0.5), ev(s, 4, 1.0), ev(u, 2, 0.5), meals = 6.0, step = 0.25)
             add("Atta", "Staples", QtyUnit.KG, Life.LONG,
