@@ -152,7 +152,8 @@ class PantryTest {
         assertEquals(LocalDate.of(2026, 11, 2), Pantry.weekStart(LocalDate.of(2026, 11, 7), anchor = sunday))
         // The shop bought on the day it starts counts in the new week.
         val shop = listOf(Entry(EventType.BOUGHT, sunday, 1.0, 500, "IKI"))
-        assertEquals(0, Pantry.week(Pantry.weekStart(sunday.minusDays(1)), mapOf(1L to shop)) { "Other" }.itemsBought)
+        // The week before runs the seven days up to the day before.
+        assertEquals(0, Pantry.week(Pantry.weekStart(sunday, anchor = sunday).minusWeeks(1), mapOf(1L to shop)) { "Other" }.itemsBought)
         assertEquals(1, Pantry.week(Pantry.weekStart(sunday, anchor = sunday), mapOf(1L to shop)) { "Other" }.itemsBought)
     }
 
