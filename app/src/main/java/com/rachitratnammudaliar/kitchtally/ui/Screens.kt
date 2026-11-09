@@ -438,7 +438,7 @@ private fun PantryList(
     val groups = categories.mapNotNull { c ->
         val list = shown.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
-    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it } +
+    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it }) +
         listOfNotNull(shown.filter { it.noRebuy }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { NOREBUY_GROUP to it })
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
