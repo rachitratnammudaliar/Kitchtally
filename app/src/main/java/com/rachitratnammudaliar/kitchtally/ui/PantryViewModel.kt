@@ -238,6 +238,10 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { dao.setRefill(item.id, needed) }
     }
 
+    fun setNoRebuy(item: Item, on: Boolean) {
+        viewModelScope.launch { dao.setNoRebuy(item.id, on) }
+    }
+
     fun setUnsure(item: Item, unsure: Boolean) {
         viewModelScope.launch { dao.setUnsure(item.id, unsure) }
     }
@@ -354,7 +358,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val match = state.items.firstOrNull { it.name.equals(clean, ignoreCase = true) }
             if (match != null) {
-                dao.update((dao.item(match.id) ?: match).copy(refillNeeded = true, hiddenFromList = false, unsure = false))
+                dao.update((dao.item(match.id) ?: match).copy(refillNeeded = true, hiddenFromList = false, unsure = false, noRebuy = false))
             } else {
                 dao.insert(ShoppingNote(text = clean))
             }

@@ -169,9 +169,10 @@ fun shopOrder(shops: Collection<String>): List<String> =
 
 /** On the list when marked, out or running low, unless hidden until it's bought again. */
 fun onShoppingList(item: Item, state: PantryState, today: LocalDate): Boolean =
-    !item.unsure && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.counting(), today) != StockStatus.OK))
+    !item.unsure && !item.noRebuy && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.counting(), today) != StockStatus.OK))
 
 const val UNSURE_GROUP = "🤔  Not sure to buy again"
+const val NOREBUY_GROUP = "🚫  No need to buy again"
 
 /** Preset categories in order, then the user's own alphabetically. */
 fun orderedCategories(used: List<String>): List<String> {
@@ -435,9 +436,10 @@ private fun PantryList(
     }
     // Items you're not sure about get their own group at the bottom.
     val groups = categories.mapNotNull { c ->
-        val list = shown.filter { !it.unsure && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
+        val list = shown.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
-    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it })
+    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it } +
+        listOfNotNull(shown.filter { it.noRebuy }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { NOREBUY_GROUP to it })
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
     val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
@@ -510,7 +512,7 @@ private fun PantryList(
         groups.forEach { (category, items) ->
             item(key = "cat-$category") {
                 Text(
-                    if (category == UNSURE_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",
+                    if (category == UNSURE_GROUP || category == NOREBUY_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -848,6 +850,10 @@ private fun WeekSummary(vm: PantryViewModel, state: PantryState, today: LocalDat
                         StatTile(week.itemsBought.toString(), "bought", Modifier.weight(1f))
                         StatTile(week.itemsUsed.toString(), "used", Modifier.weight(1f))
                         StatTile(week.timesShared.toString(), "times shared", Modifier.weight(1f))
+                    }
+                    if (week.cravingMinor > 0 && showSpending) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("🍫 ${Money.format(week.cravingMinor, currency)} on cravings (could have skipped)", style = MaterialTheme.typography.bodyMedium, color = on)
                     }
                 }
             }

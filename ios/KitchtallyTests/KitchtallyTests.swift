@@ -314,4 +314,16 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(back.items.first?.mealsPerUnit, 0.6)
         XCTAssertEqual(back.items.first?.lowInMeals, true)
     }
+
+    func testCravingsAreCountedAsWastedMoney() {
+        let monday = Day(localDate: DateComponents(calendar: .current, year: 2026, month: 11, day: 2).date!)
+        let entries: [Int64: [Entry]] = [
+            1: [Entry(type: .BOUGHT, date: monday, quantity: 1, priceMinor: 300, shop: "IKI", craving: true),
+                Entry(type: .BOUGHT, date: monday, quantity: 1, priceMinor: 200, shop: "IKI")],
+            2: [Entry(type: .BOUGHT, date: monday.plusDays(10), quantity: 1, priceMinor: 900, shop: "IKI", craving: true)],
+        ]
+        let week = Pantry.week(monday, entries, categoryOf: { _ in "Other" })
+        XCTAssertEqual(week.cravingMinor, 300)
+        XCTAssertEqual(week.spentMinor, 500)
+    }
 }

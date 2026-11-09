@@ -343,4 +343,16 @@ class PantryTest {
         assertEquals(QtyUnit.PIECE, Suggestions.forName("Toothbrush")!!.unit)
         assertEquals(QtyUnit.LEVEL, Suggestions.forName("Toothpaste")!!.unit)
     }
+
+    @Test
+    fun cravingsAreCountedAsWastedMoney() {
+        val monday = java.time.LocalDate.of(2026, 11, 2)
+        val entries = mapOf(
+            1L to listOf(Entry(EventType.BOUGHT, monday, 1.0, 300, "IKI", craving = true), Entry(EventType.BOUGHT, monday, 1.0, 200, "IKI")),
+            2L to listOf(Entry(EventType.BOUGHT, monday.plusDays(10), 1.0, 900, "IKI", craving = true)),
+        )
+        val week = Pantry.week(monday, entries) { "Other" }
+        assertEquals(300L, week.cravingMinor)
+        assertEquals(500L, week.spentMinor)
+    }
 }

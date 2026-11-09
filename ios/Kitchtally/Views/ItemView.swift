@@ -82,6 +82,13 @@ struct ItemView: View {
                         Text(item.refillNeeded ? "On your shopping list" : "Put it on the shopping list now").font(.caption).foregroundColor(.secondary)
                     }
                 }
+                Toggle(isOn: Binding(get: { item.noRebuy }, set: { store.setNoRebuy(id, $0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("No need to buy again")
+                        Text(item.noRebuy ? "Never on the shopping list. Listed under No need to buy again" : "Hide it from the shopping list for good")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
                 Toggle(isOn: Binding(get: { item.unsure }, set: { store.setUnsure(id, $0) })) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Not sure to buy again")

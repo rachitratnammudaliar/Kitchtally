@@ -37,6 +37,7 @@ object Backup {
                     .put("createdAt", i.createdAt)
                     .put("step", i.step)
                     .put("hiddenFromList", i.hiddenFromList)
+                    .put("noRebuy", i.noRebuy)
                     .put("packSize", i.packSize)
                     .put("unsure", i.unsure)
                     .put("countMeals", i.countMeals)
@@ -57,7 +58,8 @@ object Backup {
                     .put("shop", e.shop)
                     .put("note", e.note)
                     .put("createdAt", e.createdAt)
-                    .put("countsFromDay", e.countsFromDay ?: JSONObject.NULL),
+                    .put("countsFromDay", e.countsFromDay ?: JSONObject.NULL)
+                    .put("craving", e.craving),
             )
         }
         val notesJson = JSONArray()
@@ -104,6 +106,7 @@ object Backup {
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                 step = step,
                 hiddenFromList = o.optBoolean("hiddenFromList", false),
+                noRebuy = o.optBoolean("noRebuy", false),
                 unsure = o.optBoolean("unsure", false),
                 packSize = o.optDouble("packSize", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
                 countMeals = o.optBoolean("countMeals", false),
@@ -131,6 +134,7 @@ object Backup {
                 shop = o.optString("shop").trim().take(40),
                 note = o.optString("note").take(200),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
+                craving = type == EventType.BOUGHT && o.optBoolean("craving", false),
                 countsFromDay = if (type == EventType.BOUGHT && o.has("countsFromDay") && !o.isNull("countsFromDay")) o.optLong("countsFromDay") else null,
             )
         }

@@ -161,6 +161,12 @@ fun ItemScreen(
                 onChange = { vm.setRefillNeeded(item, it) },
             )
             SwitchRow(
+                title = "No need to buy again",
+                subtitle = if (item.noRebuy) "Never on the shopping list. Listed under No need to buy again" else "Hide it from the shopping list for good",
+                checked = item.noRebuy,
+                onChange = { vm.setNoRebuy(item, it) },
+            )
+            SwitchRow(
                 title = "Not sure to buy again",
                 subtitle = if (item.unsure) "Kept off the shopping list, even when it runs out" else "Keep it off the shopping list until you decide",
                 checked = item.unsure,

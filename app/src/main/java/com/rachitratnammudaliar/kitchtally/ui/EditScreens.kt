@@ -460,6 +460,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     var receipt by rememberSaveable { mutableStateOf("") }
     var originalReceipt by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
+    var craving by rememberSaveable { mutableStateOf(false) }
     var mealsText by rememberSaveable { mutableStateOf("") }
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
@@ -475,6 +476,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             receipt = existing.receiptFile
             originalReceipt = existing.receiptFile
             note = existing.note
+            craving = existing.craving
         } else {
             nextWeek = forNextUntil > today.toEpochDay()
             // Pre-fill with last time's unit price and shop.
@@ -533,6 +535,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 shop = shop.trim(),
                 receiptFile = receipt,
                 note = note.trim(),
+                craving = craving,
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 countsFromDay = if (nextWeek) Pantry.weekStart(LocalDate.ofEpochDay(day), DayOfWeek.of(weekFirst)).plusWeeks(1).toEpochDay() else null,
             ),
@@ -655,6 +658,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            SwitchRow("Bought on a craving", "Not needed, just wanted it. Counted as money wasted on Weekly.", craving) { craving = it }
             Text(
                 "Saving adds ${qty?.let { unit.label(it) } ?: "it"} to your stock" + if (item.refillNeeded) " and takes it off the shopping list." else ".",
                 style = MaterialTheme.typography.bodySmall,

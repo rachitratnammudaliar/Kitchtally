@@ -246,6 +246,9 @@ struct WeekView: View {
                             StatTile(value: "\(week.timesShared)", label: "times shared")
                         }
                         .padding(.top, 8)
+                        if week.cravingMinor > 0 && store.showSpending {
+                            Text("🍫 \(Money.format(week.cravingMinor, store.currency)) on cravings (could have skipped)").font(.subheadline).padding(.top, 4)
+                        }
                     }
                     .padding(.vertical, 6)
                     .listRowBackground(Color(rgb: 0x2E6B3A).opacity(0.12))

@@ -169,6 +169,8 @@ struct Entry {
     var shop: String = ""
     /// A purchase made for next week counts from this day on the Weekly tab.
     var countsFrom: Day? = nil
+    /// Bought on a craving: an avoidable expense.
+    var craving: Bool = false
 
     /// The day this entry counts on the Weekly tab: purchases may be moved to next week.
     var weekDate: Day { type == .BOUGHT ? (countsFrom ?? date) : date }
@@ -517,6 +519,8 @@ enum Pantry {
         /// Long-lasting things bought this week (not in the numbers above).
         var longItems: [ItemWeek] = []
         var longSpentMinor: Int64 = 0
+        /// Spent this week on things bought on a craving (an avoidable expense).
+        var cravingMinor: Int64 = 0
     }
 
     static func week(_ start: Day, _ entriesByItem: [Int64: [Entry]], categoryOf: (Int64) -> String, isLong: (Int64) -> Bool = { _ in false }) -> Week {
@@ -558,7 +562,10 @@ enum Pantry {
             timesShared: timesShared,
             itemsBought: items.filter { $0.bought > 0 }.count,
             longItems: longItems,
-            longSpentMinor: longItems.reduce(0) { $0 + $1.spentMinor }
+            longSpentMinor: longItems.reduce(0) { $0 + $1.spentMinor },
+            cravingMinor: entriesByItem.values.reduce(0) { sum, list in
+                sum + list.filter { $0.type == .BOUGHT && $0.craving && !($0.weekDate < start) && !($0.weekDate > end) }.reduce(0) { $0 + ($1.priceMinor ?? 0) }
+            }
         )
     }
 

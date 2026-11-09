@@ -143,6 +143,8 @@ data class Entry(
     val shop: String = "",
     /** A purchase made for next week counts from this day on the Weekly tab. */
     val countsFrom: LocalDate? = null,
+    /** Bought on a craving: an avoidable expense. */
+    val craving: Boolean = false,
 ) {
     /** The day this entry counts on the Weekly tab: purchases may be moved to next week. */
     val weekDate: LocalDate get() = if (type == EventType.BOUGHT) countsFrom ?: date else date
@@ -479,6 +481,8 @@ object Pantry {
         /** Long-lasting things bought this week (not in the numbers above). */
         val longItems: List<ItemWeek> = emptyList(),
         val longSpentMinor: Long = 0,
+        /** Spent on cravings: bought for fun, an avoidable expense. */
+        val cravingMinor: Long = 0,
     )
 
     /**
@@ -522,6 +526,9 @@ object Pantry {
             itemsBought = items.count { it.bought > 0 },
             longItems = longItems,
             longSpentMinor = longItems.sumOf { it.spentMinor },
+            cravingMinor = entriesByItem.values.sumOf { list ->
+                list.filter { it.type == EventType.BOUGHT && it.craving && !it.weekDate.isBefore(start) && !it.weekDate.isAfter(end) }.sumOf { it.priceMinor ?: 0 }
+            },
         )
     }
 

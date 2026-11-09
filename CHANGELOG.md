@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.0
+- New "Bought on a craving" switch on a purchase. Weekly shows how much went on cravings (could have skipped).
+- New "No need to buy again" switch on an item. It never appears on the shopping list and sits in its own group at the bottom of Pantry.
+- Database moves to version 6; your data and backups carry over (older backups still restore).
+
 ## 1.6.1
 (1.6.0 was published by mistake without the new code; 1.6.1 is the real one.)
 

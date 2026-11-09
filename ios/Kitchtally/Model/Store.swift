@@ -26,6 +26,8 @@ struct Item: Identifiable, Equatable {
     var mealsPerUnit: Double = 0
     /// lowAt is counted in meals.
     var lowInMeals: Bool = false
+    /// No need to buy again: never on the shopping list, shown in its own group.
+    var noRebuy: Bool = false
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var counting: Counting {
@@ -64,10 +66,12 @@ struct Event: Identifiable, Equatable {
     var createdAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
     /// For a purchase: the day it starts counting on the Weekly tab (a shop for next week). Nil = the day it happened.
     var countsFromDay: Int? = nil
+    /// Bought on a craving: an avoidable expense.
+    var craving: Bool = false
 
     var typeValue: EventType { EventType.from(type) }
     var date: Day { Day(epochDay: epochDay) }
-    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFrom: countsFromDay.map { Day(epochDay: $0) }) }
+    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFrom: countsFromDay.map { Day(epochDay: $0) }, craving: craving) }
 }
 
 /// The same JSON format as the Android app's backups. The app's own data file also keeps photo names.
@@ -86,7 +90,7 @@ enum Backup {
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
                 "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
-                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals,
+                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -95,7 +99,7 @@ enum Backup {
             var o: [String: Any] = [
                 "item": e.itemId, "type": e.type, "epochDay": e.epochDay, "quantity": e.quantity,
                 "priceMinor": e.priceMinor.map { $0 as Any } ?? NSNull(), "shop": e.shop, "note": e.note, "createdAt": e.createdAt,
-                "countsFromDay": e.countsFromDay.map { $0 as Any } ?? NSNull(),
+                "countsFromDay": e.countsFromDay.map { $0 as Any } ?? NSNull(), "craving": e.craving,
             ]
             if includePhotos { o["receiptFile"] = e.receiptFile }
             return o
@@ -145,7 +149,8 @@ enum Backup {
                 unsure: (o["unsure"] as? Bool) ?? false,
                 countMeals: (o["countMeals"] as? Bool) ?? false,
                 mealsPerUnit: max(0, min(number(o, "mealsPerUnit")?.doubleValue.nanToZero ?? 0, 10_000)),
-                lowInMeals: (o["lowInMeals"] as? Bool) ?? false
+                lowInMeals: (o["lowInMeals"] as? Bool) ?? false,
+                noRebuy: (o["noRebuy"] as? Bool) ?? false
             ))
         }
         let refs = Set(items.map(\.id))
@@ -167,7 +172,8 @@ enum Backup {
                 receiptFile: includePhotos ? string(o, "receiptFile") : "",
                 note: String(string(o, "note").prefix(200)),
                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
-                countsFromDay: type == .BOUGHT ? number(o, "countsFromDay")?.intValue : nil
+                countsFromDay: type == .BOUGHT ? number(o, "countsFromDay")?.intValue : nil,
+                craving: type == .BOUGHT && ((o["craving"] as? Bool) ?? false)
             ))
         }
         var notes: [ShoppingNote] = []
@@ -303,7 +309,7 @@ final class Store: ObservableObject {
     func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), item.counting, today) }
     /// On the list when marked, out or running low, unless hidden until it's bought again.
     func onShoppingList(_ item: Item, _ today: Day) -> Bool {
-        !item.unsure && (item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok))
+        !item.unsure && !item.noRebuy && (item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok))
     }
 
     // MARK: Saving
@@ -384,7 +390,7 @@ final class Store: ObservableObject {
             var copy = i
             if i.id == id {
                 copy.refillNeeded = needed
-                if needed { copy.unsure = false }
+                if needed { copy.unsure = false; copy.noRebuy = false }
             }
             return copy
         }
@@ -396,7 +402,19 @@ final class Store: ObservableObject {
             var copy = i
             if i.id == id {
                 copy.unsure = unsure
-                if unsure { copy.refillNeeded = false }
+                if unsure { copy.refillNeeded = false; copy.noRebuy = false }
+            }
+            return copy
+        }
+        persist()
+    }
+
+    func setNoRebuy(_ id: Int64, _ on: Bool) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id {
+                copy.noRebuy = on
+                if on { copy.refillNeeded = false; copy.unsure = false }
             }
             return copy
         }
@@ -541,6 +559,7 @@ final class Store: ObservableObject {
                     copy.refillNeeded = true
                     copy.hiddenFromList = false
                     copy.unsure = false
+                    copy.noRebuy = false
                 }
                 return copy
             }

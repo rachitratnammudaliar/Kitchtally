@@ -58,6 +58,9 @@ data class Item(
     val mealsPerUnit: Double = 0.0,
     /** [lowAt] is counted in meals. */
     val lowInMeals: Boolean = false,
+    // Added in database version 6 (app 1.7.0).
+    /** No need to buy again: never on the shopping list, shown in its own group. */
+    val noRebuy: Boolean = false,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -90,6 +93,9 @@ data class Event(
     val createdAt: Long = System.currentTimeMillis(),
     /** For BOUGHT: the day this purchase starts counting on the Weekly tab (a shop for next week). Null = the day it happened. */
     val countsFromDay: Long? = null,
+    // Added in database version 6 (app 1.7.0).
+    /** Bought on a craving: an avoidable expense. */
+    val craving: Boolean = false,
 )
 
 fun Item.unitValue(): QtyUnit = QtyUnit.fromName(unit)
@@ -106,7 +112,7 @@ fun Event.typeValue(): EventType = EventType.fromName(type)
 
 fun Event.date(): LocalDate = LocalDate.ofEpochDay(epochDay)
 
-fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop, countsFromDay?.let { LocalDate.ofEpochDay(it) })
+fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop, countsFromDay?.let { LocalDate.ofEpochDay(it) }, craving)
 
 @Dao
 interface PantryDao {
@@ -133,11 +139,14 @@ interface PantryDao {
     suspend fun stockOf(id: Long): Double
 
     /** Marking an item as needed also means you're sure about buying it again. */
-    @Query("UPDATE items SET refillNeeded = :needed, unsure = CASE WHEN :needed THEN 0 ELSE unsure END WHERE id = :id")
+    @Query("UPDATE items SET refillNeeded = :needed, unsure = CASE WHEN :needed THEN 0 ELSE unsure END, noRebuy = CASE WHEN :needed THEN 0 ELSE noRebuy END WHERE id = :id")
     suspend fun setRefill(id: Long, needed: Boolean)
 
-    @Query("UPDATE items SET unsure = :unsure, refillNeeded = CASE WHEN :unsure THEN 0 ELSE refillNeeded END WHERE id = :id")
+    @Query("UPDATE items SET unsure = :unsure, refillNeeded = CASE WHEN :unsure THEN 0 ELSE refillNeeded END, noRebuy = CASE WHEN :unsure THEN 0 ELSE noRebuy END WHERE id = :id")
     suspend fun setUnsure(id: Long, unsure: Boolean)
+
+    @Query("UPDATE items SET noRebuy = :on, refillNeeded = CASE WHEN :on THEN 0 ELSE refillNeeded END, unsure = CASE WHEN :on THEN 0 ELSE unsure END WHERE id = :id")
+    suspend fun setNoRebuy(id: Long, on: Boolean)
 
     @Query("SELECT * FROM items")
     suspend fun items(): List<Item>
@@ -229,7 +238,15 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 5, exportSchema = false)
+/** Version 5 -> 6 (app 1.6 -> 1.7.0): bought-on-a-craving purchases, and "no need to buy again" items. */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN craving INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN noRebuy INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 6, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -242,7 +259,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build().also { instance = it }
             }
     }

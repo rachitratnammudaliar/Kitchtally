@@ -293,6 +293,7 @@ struct PurchaseView: View {
     @State private var inPacks = true
     @State private var date = Date()
     @State private var nextWeek = false
+    @State private var craving = false
     @State private var perUnit = false
     @State private var priceText = ""
     @State private var shop = ""
@@ -331,6 +332,7 @@ struct PurchaseView: View {
             qtyText = Qty.format(e.quantity)
             date = e.date.localDate
             nextWeek = e.countsFromDay != nil
+            craving = e.craving
             priceText = e.priceMinor.map { Money.minorToInput($0) } ?? ""
             shop = e.shop
             receipt = e.receiptFile
@@ -372,7 +374,8 @@ struct PurchaseView: View {
             receiptFile: receipt,
             note: note.trimmingCharacters(in: .whitespaces),
             createdAt: existing?.createdAt ?? Int64(Date().timeIntervalSince1970 * 1000),
-            countsFromDay: nextWeek ? Pantry.weekStart(Day(localDate: date), first: store.weekStartDay).plusDays(7).epochDay : nil
+            countsFromDay: nextWeek ? Pantry.weekStart(Day(localDate: date), first: store.weekStartDay).plusDays(7).epochDay : nil,
+            craving: craving
         ))
         dismiss()
     }
@@ -459,6 +462,12 @@ struct PurchaseView: View {
                             receipt = ""
                         })
                     }
+                }
+
+                Section {
+                    Toggle("Bought on a craving", isOn: $craving)
+                } footer: {
+                    Text("Not needed, just wanted it. Counted as money wasted on Weekly.")
                 }
 
                 Section {
