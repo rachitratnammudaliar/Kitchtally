@@ -97,6 +97,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
+import com.rachitratnammudaliar.kitchtally.domain.Recipes
 import com.rachitratnammudaliar.kitchtally.domain.Qty
 import com.rachitratnammudaliar.kitchtally.domain.StockStatus
 import kotlinx.coroutines.CoroutineScope
