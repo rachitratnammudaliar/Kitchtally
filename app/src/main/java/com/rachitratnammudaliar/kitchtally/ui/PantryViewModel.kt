@@ -12,6 +12,11 @@ import com.rachitratnammudaliar.kitchtally.data.AppDatabase
 import com.rachitratnammudaliar.kitchtally.data.Event
 import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.PhotoStore
+import com.rachitratnammudaliar.kitchtally.data.Recipe
+import com.rachitratnammudaliar.kitchtally.data.encodeLines
+import com.rachitratnammudaliar.kitchtally.data.lineList
+import com.rachitratnammudaliar.kitchtally.domain.RecipeLine
+import com.rachitratnammudaliar.kitchtally.domain.Recipes
 import com.rachitratnammudaliar.kitchtally.data.Prefs
 import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
 import com.rachitratnammudaliar.kitchtally.data.unitValue
@@ -46,6 +51,7 @@ data class PantryState(
     val items: List<Item>,
     val events: List<Event>,
     val notes: List<ShoppingNote> = emptyList(),
+    val recipes: List<Recipe> = emptyList(),
 ) {
     val eventsByItem: Map<Long, List<Event>> = events.groupBy { it.itemId }
     val entriesByItem: Map<Long, List<Entry>> = eventsByItem.mapValues { (_, l) -> l.map { it.toEntry() } }
@@ -68,8 +74,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = db.pantry()
     private val prefs = Prefs(app)
 
-    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes()) { items, events, notes ->
-        PantryState(items, events, notes)
+    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes(), dao.observeRecipes()) { items, events, notes, recipes ->
+        PantryState(items, events, notes, recipes)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Quick taps are handled one at a time, so stock can't go below zero. */
@@ -230,6 +236,57 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             withContext(Dispatchers.IO) {
                 PhotoStore.delete(getApplication(), item.photoFile)
                 events.forEach { PhotoStore.delete(getApplication(), it.receiptFile) }
+            }
+        }
+    }
+
+    fun setBuyPriority(item: Item, priority: Int) {
+        viewModelScope.launch { dao.setBuyPriority(item.id, priority.coerceIn(0, 2)) }
+    }
+
+    fun saveRecipe(recipe: Recipe, onSaved: () -> Unit = {}) {
+        viewModelScope.launch {
+            if (recipe.id == 0L) dao.insert(recipe) else dao.update(recipe)
+            onSaved()
+        }
+    }
+
+    fun deleteRecipe(recipe: Recipe) {
+        viewModelScope.launch { dao.delete(recipe) }
+    }
+
+    fun setPlan(recipe: Recipe, day: Long) {
+        viewModelScope.launch { dao.setPlanned(recipe.id, day) }
+    }
+
+    /** Marks the missing ingredients as needing a refill, so they show on To buy. */
+    fun addMissingToBuy(items: List<Item>) {
+        viewModelScope.launch { items.forEach { dao.setRefill(it.id, true) } }
+    }
+
+    /**
+     * Cook a recipe: every ingredient goes down by the amount given (never below zero), solo or shared.
+     * A planned meal is ticked off. Undo puts it all back.
+     */
+    fun cookRecipe(recipe: Recipe, amounts: List<Pair<Item, Double>>, shared: Boolean, onDone: (message: String, undo: () -> Unit) -> Unit) {
+        viewModelScope.launch {
+            val ids = tapLock.withLock {
+                db.withTransaction {
+                    amounts.mapNotNull { (item, wanted) ->
+                        val amount = Qty.round(minOf(wanted, dao.stockOf(item.id)))
+                        if (amount <= 0) return@mapNotNull null
+                        val type = if (shared) EventType.SHARED else EventType.USED
+                        dao.insert(Event(itemId = item.id, type = type.name, epochDay = LocalDate.now().toEpochDay(), quantity = amount, note = "Cooked ${recipe.name}".take(80)))
+                    }
+                }
+            }
+            dao.setPlanned(recipe.id, Recipes.NOT_PLANNED)
+            val meals = if (shared) recipe.mealsShared else recipe.mealsAlone
+            onDone("Cooked ${recipe.name} · $meals ${if (meals == 1) "meal" else "meals"}${if (shared) ", shared" else ""}") {
+                viewModelScope.launch {
+                    db.withTransaction { ids.forEach { dao.deleteEvent(it) } }
+                    dao.setPlanned(recipe.id, recipe.plannedDay)
+                }
             }
         }
     }
@@ -414,7 +471,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun exportTo(uri: Uri): Int = withContext(Dispatchers.IO) {
         val items = dao.items()
-        val text = Backup.encode(items, dao.events(), dao.notes())
+        val text = Backup.encode(items, dao.events(), dao.notes(), dao.recipes())
         getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
             ?: throw IllegalStateException("Couldn't write the file")
         items.size
@@ -425,11 +482,16 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             ?: throw IllegalStateException("Couldn't read the file")
         val contents = Backup.decode(text)
         db.withTransaction {
+            val newIds = mutableMapOf<Long, Long>()
             contents.items.forEach { item ->
                 val events = contents.events.filter { it.itemId == item.id }
-                dao.insertItemWithEvents(item.copy(id = 0), events)
+                newIds[item.id] = dao.insertItemWithEvents(item.copy(id = 0), events)
             }
             contents.notes.forEach { dao.insert(it.copy(id = 0)) }
+            contents.recipes.forEach { r ->
+                val lines = r.lineList().mapNotNull { l -> newIds[l.itemId]?.let { l.copy(itemId = it) } }
+                dao.insert(r.copy(id = 0, lines = encodeLines(lines)))
+            }
         }
         contents.items.size
     }

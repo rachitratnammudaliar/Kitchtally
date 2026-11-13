@@ -2,9 +2,11 @@ package com.rachitratnammudaliar.kitchtally.backup
 
 import com.rachitratnammudaliar.kitchtally.data.Event
 import com.rachitratnammudaliar.kitchtally.data.Item
+import com.rachitratnammudaliar.kitchtally.data.Recipe
 import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
 import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
+import com.rachitratnammudaliar.kitchtally.domain.Recipes
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
@@ -17,11 +19,11 @@ import org.json.JSONObject
  */
 object Backup {
     private const val FORMAT = "kitchtally-backup"
-    private const val VERSION = 4
+    private const val VERSION = 5
 
-    data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList())
+    data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList(), val recipes: List<Recipe> = emptyList())
 
-    fun encode(items: List<Item>, events: List<Event>, notes: List<ShoppingNote> = emptyList()): String {
+    fun encode(items: List<Item>, events: List<Event>, notes: List<ShoppingNote> = emptyList(), recipes: List<Recipe> = emptyList()): String {
         val itemsJson = JSONArray()
         items.forEach { i ->
             itemsJson.put(
@@ -38,6 +40,7 @@ object Backup {
                     .put("step", i.step)
                     .put("hiddenFromList", i.hiddenFromList)
                     .put("noRebuy", i.noRebuy)
+                    .put("buyPriority", i.buyPriority)
                     .put("packSize", i.packSize)
                     .put("unsure", i.unsure)
                     .put("countMeals", i.countMeals)
@@ -70,6 +73,10 @@ object Backup {
             .put("items", itemsJson)
             .put("events", eventsJson)
             .put("shopping", notesJson)
+            .put("recipes", JSONArray(recipes.map { r ->
+                JSONObject().put("name", r.name).put("mealsAlone", r.mealsAlone).put("mealsShared", r.mealsShared)
+                    .put("plannedDay", r.plannedDay).put("lines", JSONArray(r.lines))
+            }))
             .toString(2)
     }
 
@@ -107,6 +114,7 @@ object Backup {
                 step = step,
                 hiddenFromList = o.optBoolean("hiddenFromList", false),
                 noRebuy = o.optBoolean("noRebuy", false),
+                buyPriority = o.optInt("buyPriority", 1).coerceIn(0, 2),
                 unsure = o.optBoolean("unsure", false),
                 packSize = o.optDouble("packSize", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
                 countMeals = o.optBoolean("countMeals", false),
@@ -145,6 +153,20 @@ object Backup {
             val text = o.optString("text").trim()
             if (text.isNotEmpty()) notes += ShoppingNote(text = text.take(80), createdAt = o.optLong("createdAt", System.currentTimeMillis()))
         }
-        return Contents(items, events, notes)
+        val recipes = mutableListOf<Recipe>()
+        val recipesJson = root.optJSONArray("recipes") ?: JSONArray()
+        for (i in 0 until recipesJson.length()) {
+            val o = recipesJson.optJSONObject(i) ?: continue
+            val name = o.optString("name").trim()
+            if (name.isEmpty()) continue
+            recipes += Recipe(
+                name = name.take(60),
+                mealsAlone = o.optInt("mealsAlone", 4).coerceIn(1, 99),
+                mealsShared = o.optInt("mealsShared", 2).coerceIn(1, 99),
+                lines = (o.optJSONArray("lines") ?: JSONArray()).toString(),
+                plannedDay = o.optLong("plannedDay", Recipes.NOT_PLANNED),
+            )
+        }
+        return Contents(items, events, notes, recipes)
     }
 }

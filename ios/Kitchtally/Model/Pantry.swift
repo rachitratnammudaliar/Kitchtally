@@ -688,3 +688,60 @@ enum Badges {
         return String(c).uppercased()
     }
 }
+
+// MARK: - Recipes
+
+/// An item that a planned meal still needs, and which meals want it.
+struct PlannedNeed {
+    let item: Item
+    let recipes: [Recipe]
+    let needed: Bool
+}
+
+enum RecipeStatus: Int { case ready = 0, missingOptional, missing }
+
+enum Recipes {
+    static let notPlanned = -1
+    static let anyDay = 0
+
+    /// Enough of it in the pantry for one cook (a little is enough when no amount is set).
+    static func has(_ line: RecipeLine, _ stock: Double) -> Bool { stock + 1e-9 >= (line.amount > 0 ? line.amount : 0.001) }
+
+    static func missing(_ lines: [RecipeLine], stockOf: (Int64) -> Double, needed: Bool) -> [RecipeLine] {
+        lines.filter { $0.needed == needed && !has($0, stockOf($0.itemId)) }
+    }
+
+    static func status(_ lines: [RecipeLine], stockOf: (Int64) -> Double) -> RecipeStatus {
+        if !missing(lines, stockOf: stockOf, needed: true).isEmpty { return .missing }
+        if !missing(lines, stockOf: stockOf, needed: false).isEmpty { return .missingOptional }
+        return .ready
+    }
+
+    /// Roughly what one cook costs, from the last price paid per unit. Nil when nothing has a price.
+    static func cost(_ lines: [RecipeLine], unitPriceMinor: (Int64) -> Double?) -> Int64? {
+        var total = 0.0
+        var any = false
+        for line in lines where line.amount > 0 {
+            if let p = unitPriceMinor(line.itemId) { total += p * line.amount; any = true }
+        }
+        return any ? Int64(total.rounded()) : nil
+    }
+
+    /// Price per unit from the last priced purchase; nil if there isn't one.
+    static func unitPriceMinor(_ entries: [Entry]) -> Double? {
+        guard let e = Pantry.lastPriced(entries), let p = e.priceMinor, e.quantity > 0 else { return nil }
+        return Double(p) / e.quantity
+    }
+
+    /// "Mon 16" for a planned day, "This week" for any day.
+    static func planLabel(_ plannedDay: Int, _ today: Day) -> String {
+        if plannedDay == notPlanned { return "Not planned" }
+        if plannedDay == anyDay { return "This week" }
+        if plannedDay == today.epochDay { return "Today" }
+        if plannedDay == today.epochDay + 1 { return "Tomorrow" }
+        let f = DateFormatter()
+        f.dateFormat = "EEE d"
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f.string(from: Day(epochDay: plannedDay).date)
+    }
+}

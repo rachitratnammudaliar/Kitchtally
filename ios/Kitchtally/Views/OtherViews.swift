@@ -21,12 +21,16 @@ struct ShoppingView: View {
     }
 
     var body: some View {
-        let list = store.items.filter { store.onShoppingList($0, today) }
-        // Grouped by where you usually buy each thing.
+        let planned = store.plannedNeeds()
+        let plannedIds = Set(planned.map { $0.item.id })
+        let list = store.items.filter { store.onShoppingList($0, today) && !plannedIds.contains($0.id) }
+        // Grouped by where you usually buy each thing, or by ASAP / Priority / Anytime once some are moved.
         let byShop = Dictionary(grouping: list) { Pantry.lastShop(store.entries($0.id)) }
         let shops = shopOrder(Array(byShop.keys))
-        let tickedNow = list.filter { ticked.contains($0.id) }
-        let estimate = list.reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id), packSize: $1.packSize) ?? 0) }
+        let byPriority = Dictionary(grouping: list) { $0.buyPriority }
+        let priorityTitles: [(Int, String)] = [(0, "⚡  ASAP"), (1, "📌  Priority"), (2, "🕐  Anytime")]
+        let tickedNow = (list + planned.map(\.item)).filter { ticked.contains($0.id) }
+        let estimate = (list + planned.map(\.item)).reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id), packSize: $1.packSize) ?? 0) }
         let hidden = store.items.filter { $0.hiddenFromList && store.status($0, today) != .ok }
 
         NavigationStack(path: $path) {
@@ -45,7 +49,7 @@ struct ShoppingView: View {
                     if let info = info { Text(info).font(.caption).foregroundColor(.secondary) }
                 }
 
-                if list.isEmpty && store.notes.isEmpty {
+                if list.isEmpty && planned.isEmpty && store.notes.isEmpty {
                     VStack(spacing: 10) {
                         Text("🛒").font(.system(size: 44))
                         Text("Nothing to buy").font(.headline)
@@ -55,8 +59,8 @@ struct ShoppingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
                 } else {
-                    Text("\(list.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : "")
-                         + (list.isEmpty ? "" : ". Tick what you bought, then tap Done shopping."))
+                    Text("\(list.count + planned.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : "")
+                         + (list.isEmpty && planned.isEmpty ? "" : ". Tick what you bought, then tap Done shopping."))
                         .font(.subheadline).foregroundColor(.secondary)
                 }
 
@@ -76,13 +80,37 @@ struct ShoppingView: View {
                     }
                 }
 
-                ForEach(shops, id: \.self) { shop in
-                    let rows = (byShop[shop] ?? []).sorted { a, b in
-                        let sa = store.status(a, today).rawValue, sb = store.status(b, today).rawValue
-                        return sa != sb ? sa < sb : a.name.lowercased() < b.name.lowercased()
+                if !planned.isEmpty {
+                    Section("🍳  For planned meals · \(planned.count)") {
+                        ForEach(planned, id: \.item.id) { need in
+                            row(need.item, reason: "for " + need.recipes.map { r in r.name + (r.plannedDay > 0 ? " · " + Recipes.planLabel(r.plannedDay, today) : "") }.joined(separator: ", ") + (need.needed ? "" : " (optional)"))
+                        }
                     }
-                    Section(shop.isEmpty ? "🛒  Anywhere · \(rows.count)" : "🏪  \(shop) · \(rows.count)") {
-                        ForEach(rows) { item in row(item) }
+                }
+
+                if byPriority.keys.count > 1 {
+                    ForEach(priorityTitles, id: \.0) { priority, title in
+                        let rows = (byPriority[priority] ?? []).sorted { a, b in
+                            let sa = Pantry.lastShop(store.entries(a.id)), sb = Pantry.lastShop(store.entries(b.id))
+                            if sa != sb { return (sa.isEmpty ? "~" : sa.lowercased()) < (sb.isEmpty ? "~" : sb.lowercased()) }
+                            let ta = store.status(a, today).rawValue, tb = store.status(b, today).rawValue
+                            return ta != tb ? ta < tb : a.name.lowercased() < b.name.lowercased()
+                        }
+                        if !rows.isEmpty {
+                            Section("\(title) · \(rows.count)") {
+                                ForEach(rows) { item in row(item, shop: Pantry.lastShop(store.entries(item.id))) }
+                            }
+                        }
+                    }
+                } else {
+                    ForEach(shops, id: \.self) { shop in
+                        let rows = (byShop[shop] ?? []).sorted { a, b in
+                            let sa = store.status(a, today).rawValue, sb = store.status(b, today).rawValue
+                            return sa != sb ? sa < sb : a.name.lowercased() < b.name.lowercased()
+                        }
+                        Section(shop.isEmpty ? "🛒  Anywhere · \(rows.count)" : "🏪  \(shop) · \(rows.count)") {
+                            ForEach(rows) { item in row(item) }
+                        }
                     }
                 }
 
@@ -92,7 +120,7 @@ struct ShoppingView: View {
             }
             .navigationTitle("Shopping list")
             .toolbar {
-                if !list.isEmpty || !store.notes.isEmpty {
+                if !list.isEmpty || !planned.isEmpty || !store.notes.isEmpty {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         ShareLink(item: shoppingText(store, today)) { Image(systemName: "square.and.arrow.up") }
                             .accessibilityLabel("Share list")
@@ -128,7 +156,7 @@ struct ShoppingView: View {
         }
     }
 
-    private func row(_ item: Item) -> some View {
+    private func row(_ item: Item, reason: String? = nil, shop shopName: String = "") -> some View {
         let entries = store.entries(item.id)
         let unit = item.unitValue
         let expected = Pantry.expectedPriceMinor(unit, entries, packSize: item.packSize)
@@ -138,6 +166,7 @@ struct ShoppingView: View {
         _ = shop
         let line = "Usually \(unit.label(Pantry.buyAmount(unit, entries, packSize: item.packSize)))"
             + (expected.map { " · \(Money.format($0, store.currency))" } ?? "")
+            + (shopName.isEmpty ? "" : " · \(shopName)")
         let isTicked = ticked.contains(item.id)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -154,6 +183,9 @@ struct ShoppingView: View {
                     Text(item.name).font(.headline).lineLimit(1)
                     StockPill(text: stockLabel(item, Pantry.stock(entries)), status: status)
                     Text(line).font(.caption).foregroundColor(.secondary).lineLimit(2)
+                    if let reason = reason {
+                        Text("🍳  \(reason)").font(.caption).foregroundColor(.accentColor).lineLimit(3)
+                    }
                 }
                 Spacer(minLength: 4)
             }
@@ -161,7 +193,10 @@ struct ShoppingView: View {
             .onTapGesture { path.append(item.id) }
             HStack {
                 Spacer()
-                Menu("Not now") {
+                Menu("More") {
+                    ForEach([(0, "Move to ASAP"), (1, "Move to Priority"), (2, "Move to Anytime")].filter { $0.0 != item.buyPriority }, id: \.0) { priority, label in
+                        Button(label) { store.setBuyPriority(item.id, priority) }
+                    }
                     Button("Hide until I buy it") {
                         if item.refillNeeded && status == .ok {
                             store.setRefillNeeded(item.id, false)

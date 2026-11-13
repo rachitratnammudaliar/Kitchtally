@@ -326,4 +326,21 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(week.cravingMinor, 300)
         XCTAssertEqual(week.spentMinor, 500)
     }
+
+    func testRecipesShowWhatIsMissing() {
+        let stock: [Int64: Double] = [1: 1, 2: 0, 3: 0.5]
+        let of: (Int64) -> Double = { stock[$0] ?? 0 }
+        let chole = [RecipeLine(itemId: 1, needed: true, amount: 1), RecipeLine(itemId: 2, needed: false, amount: 0)]
+        XCTAssertEqual(Recipes.status(chole, stockOf: of), .missingOptional)
+        XCTAssertEqual(Recipes.missing(chole, stockOf: of, needed: false).map(\.itemId), [2])
+        XCTAssertEqual(Recipes.status([RecipeLine(itemId: 1, needed: true, amount: 1), RecipeLine(itemId: 3, needed: true, amount: 0.5)], stockOf: of), .ready)
+        XCTAssertEqual(Recipes.status([RecipeLine(itemId: 3, needed: true, amount: 1)], stockOf: of), .missing)
+        XCTAssertEqual(Recipes.status([RecipeLine(itemId: 2, needed: true, amount: 0)], stockOf: of), .missing)
+    }
+
+    func testRecipeCostComesFromLastPrices() {
+        let lines = [RecipeLine(itemId: 1, needed: true, amount: 2), RecipeLine(itemId: 2, needed: true, amount: 0)]
+        XCTAssertEqual(Recipes.cost(lines, unitPriceMinor: { $0 == 1 ? 200 : nil }), 400)
+        XCTAssertNil(Recipes.cost(lines, unitPriceMinor: { _ in nil }))
+    }
 }

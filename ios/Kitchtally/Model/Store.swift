@@ -28,6 +28,8 @@ struct Item: Identifiable, Equatable {
     var lowInMeals: Bool = false
     /// No need to buy again: never on the shopping list, shown in its own group.
     var noRebuy: Bool = false
+    /// Where it sits on To buy: 0 ASAP, 1 Priority (usual), 2 Anytime. Back to 1 once bought.
+    var buyPriority: Int = 1
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var counting: Counting {
@@ -35,6 +37,26 @@ struct Item: Identifiable, Equatable {
         return Counting(unit: unitValue, lowAt: lowAt, mealsPerUnit: meals, lowInMeals: lowInMeals && meals > 0)
     }
     var lifeValue: Life { Life.from(life) }
+}
+
+/// One ingredient of a recipe: an item from the pantry, needed or optional, with its usual amount.
+struct RecipeLine: Equatable {
+    var itemId: Int64
+    var needed: Bool = true
+    var amount: Double = 0
+}
+
+/// A dish: ingredients picked from the pantry, how many meals one cook makes, and when it's planned.
+struct Recipe: Identifiable, Equatable {
+    var id: Int64 = 0
+    var name: String
+    /// Meals from one cook when you eat it yourself.
+    var mealsAlone: Int = 4
+    /// Meals from one cook when you share it.
+    var mealsShared: Int = 2
+    var lines: [RecipeLine] = []
+    /// -1 not planned, 0 some day this week, otherwise the epoch day it's planned for.
+    var plannedDay: Int = -1
 }
 
 /// Something to buy that isn't a pantry item.
@@ -83,14 +105,14 @@ enum Backup {
         var errorDescription: String? { "This file isn't a Kitchtally backup." }
     }
 
-    static func encode(_ items: [Item], _ events: [Event], notes: [ShoppingNote] = [], includePhotos: Bool = false) -> Data {
+    static func encode(_ items: [Item], _ events: [Event], notes: [ShoppingNote] = [], recipes: [Recipe] = [], includePhotos: Bool = false) -> Data {
         let ids = Set(items.map(\.id))
         let itemsJson: [[String: Any]] = items.map { i in
             var o: [String: Any] = [
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
                 "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
-                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy,
+                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy, "buyPriority": i.buyPriority,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -105,7 +127,11 @@ enum Backup {
             return o
         }
         let notesJson: [[String: Any]] = notes.map { ["text": $0.text, "createdAt": $0.createdAt] }
-        let root: [String: Any] = ["format": format, "version": 5, "items": itemsJson, "events": eventsJson, "shopping": notesJson]
+        let recipesJson: [[String: Any]] = recipes.map { r in
+            ["name": r.name, "mealsAlone": r.mealsAlone, "mealsShared": r.mealsShared, "plannedDay": r.plannedDay,
+             "lines": r.lines.map { ["i": $0.itemId, "n": $0.needed, "a": $0.amount] as [String: Any] }]
+        }
+        let root: [String: Any] = ["format": format, "version": 6, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -118,7 +144,7 @@ enum Backup {
         return n
     }
 
-    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event], notes: [ShoppingNote]) {
+    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event], notes: [ShoppingNote], recipes: [Recipe]) {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               root["format"] as? String == format else { throw BackupError.notABackup }
         var items: [Item] = []
@@ -150,7 +176,8 @@ enum Backup {
                 countMeals: (o["countMeals"] as? Bool) ?? false,
                 mealsPerUnit: max(0, min(number(o, "mealsPerUnit")?.doubleValue.nanToZero ?? 0, 10_000)),
                 lowInMeals: (o["lowInMeals"] as? Bool) ?? false,
-                noRebuy: (o["noRebuy"] as? Bool) ?? false
+                noRebuy: (o["noRebuy"] as? Bool) ?? false,
+                buyPriority: min(2, max(0, number(o, "buyPriority")?.intValue ?? 1))
             ))
         }
         let refs = Set(items.map(\.id))
@@ -183,7 +210,24 @@ enum Backup {
                 notes.append(ShoppingNote(text: String(text.prefix(80)), createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)))
             }
         }
-        return (items, events, notes)
+        var recipes: [Recipe] = []
+        for case let o as [String: Any] in root["recipes"] as? [Any] ?? [] {
+            let name = string(o, "name").trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { continue }
+            var lines: [RecipeLine] = []
+            for case let l as [String: Any] in o["lines"] as? [Any] ?? [] {
+                guard let id = number(l, "i")?.int64Value else { continue }
+                lines.append(RecipeLine(itemId: id, needed: (l["n"] as? Bool) ?? true, amount: max(0, number(l, "a")?.doubleValue ?? 0)))
+            }
+            recipes.append(Recipe(
+                name: String(name.prefix(60)),
+                mealsAlone: min(99, max(1, number(o, "mealsAlone")?.intValue ?? 4)),
+                mealsShared: min(99, max(1, number(o, "mealsShared")?.intValue ?? 2)),
+                lines: lines,
+                plannedDay: number(o, "plannedDay")?.intValue ?? -1
+            ))
+        }
+        return (items, events, notes, recipes)
     }
 }
 
@@ -252,6 +296,7 @@ final class Store: ObservableObject {
     @Published private(set) var items: [Item] = []
     @Published private(set) var events: [Event] = []
     @Published private(set) var notes: [ShoppingNote] = []
+    @Published private(set) var recipes: [Recipe] = []
     @Published var problem: String?
     @Published var currency: String {
         didSet { UserDefaults.standard.set(currency, forKey: "currency") }
@@ -279,6 +324,7 @@ final class Store: ObservableObject {
     private let fileURL: URL
     private var nextEventId: Int64 = 1
     private var nextNoteId: Int64 = 1
+    private var nextRecipeId: Int64 = 1
 
     init(directory: URL? = nil) {
         let dir = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -331,6 +377,12 @@ final class Store: ObservableObject {
                 nextNoteId += 1
                 return copy
             }
+            recipes = contents.recipes.map { r in
+                var copy = r
+                copy.id = nextRecipeId
+                nextRecipeId += 1
+                return copy
+            }
         } catch {
             let kept = fileURL.deletingLastPathComponent().appendingPathComponent("pantry-unreadable-\(Int(Date().timeIntervalSince1970)).json")
             try? FileManager.default.moveItem(at: fileURL, to: kept)
@@ -340,7 +392,7 @@ final class Store: ObservableObject {
 
     private func persist() {
         do {
-            try Backup.encode(items, events, notes: notes, includePhotos: true).write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try Backup.encode(items, events, notes: notes, recipes: recipes, includePhotos: true).write(to: fileURL, options: [.atomic, .completeFileProtection])
         } catch {
             problem = "Couldn't save: \(error.localizedDescription)"
         }
@@ -542,6 +594,7 @@ final class Store: ObservableObject {
             if i.id == id {
                 copy.refillNeeded = false
                 copy.hiddenFromList = false
+                copy.buyPriority = 1
             }
             return copy
         }
@@ -621,6 +674,89 @@ final class Store: ObservableObject {
         })
     }
 
+    // MARK: Recipes
+
+    func setBuyPriority(_ id: Int64, _ priority: Int) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id { copy.buyPriority = min(2, max(0, priority)) }
+            return copy
+        }
+        persist()
+    }
+
+    func saveRecipe(_ recipe: Recipe) {
+        if recipe.id == 0 {
+            var copy = recipe
+            copy.id = nextRecipeId
+            nextRecipeId += 1
+            recipes.append(copy)
+        } else {
+            recipes = recipes.map { $0.id == recipe.id ? recipe : $0 }
+        }
+        recipes.sort { $0.name.lowercased() < $1.name.lowercased() }
+        persist()
+    }
+
+    func deleteRecipe(_ id: Int64) {
+        recipes.removeAll { $0.id == id }
+        persist()
+    }
+
+    func setPlan(_ id: Int64, _ day: Int) {
+        recipes = recipes.map { r in
+            var copy = r
+            if r.id == id { copy.plannedDay = day }
+            return copy
+        }
+        persist()
+    }
+
+    /// Marks the missing ingredients as needing a refill, so they show on To buy.
+    func addMissingToBuy(_ chosen: [Item]) {
+        for item in chosen { setRefillNeeded(item.id, true) }
+    }
+
+    /// What's missing for the meals you've planned. Needed things first, then optional ones.
+    func plannedNeeds() -> [PlannedNeed] {
+        var order: [Int64] = []
+        var wanted: [Int64: [(Recipe, Bool)]] = [:]
+        for recipe in recipes where recipe.plannedDay != Recipes.notPlanned {
+            for line in Recipes.missing(recipe.lines, stockOf: { self.stock($0) }, needed: true) + Recipes.missing(recipe.lines, stockOf: { self.stock($0) }, needed: false) {
+                if wanted[line.itemId] == nil { order.append(line.itemId) }
+                wanted[line.itemId, default: []].append((recipe, line.needed))
+            }
+        }
+        let needs: [PlannedNeed] = order.compactMap { id in
+            guard let item = self.item(id), let list = wanted[id] else { return nil }
+            var seen = Set<Int64>()
+            let rs = list.map(\.0).filter { seen.insert($0.id).inserted }
+            return PlannedNeed(item: item, recipes: rs, needed: list.contains { $0.1 })
+        }
+        return needs.sorted { a, b in a.needed != b.needed ? a.needed : a.item.name.lowercased() < b.item.name.lowercased() }
+    }
+
+    /// Cook a recipe: every ingredient goes down by the amount given (never below zero), solo or shared.
+    func cookRecipe(_ recipe: Recipe, amounts: [(Item, Double)], shared: Bool) -> (String, () -> Void)? {
+        var ids: [Int64] = []
+        for (item, wanted) in amounts {
+            let amount = Qty.round(min(wanted, stock(item.id)))
+            guard amount > 0 else { continue }
+            appendEvent(Event(itemId: item.id, type: (shared ? EventType.SHARED : .USED).rawValue, epochDay: Day.today().epochDay, quantity: amount, note: String("Cooked \(recipe.name)".prefix(80))))
+            ids.append(nextEventId - 1)
+        }
+        let before = recipe.plannedDay
+        setPlan(recipe.id, Recipes.notPlanned)
+        guard !ids.isEmpty else { return nil }
+        persist()
+        let gone = Set(ids)
+        let meals = shared ? recipe.mealsShared : recipe.mealsAlone
+        return ("Cooked \(recipe.name) · \(meals) \(meals == 1 ? "meal" : "meals")\(shared ? ", shared" : "")", {
+            self.events.removeAll { gone.contains($0.id) }
+            self.setPlan(recipe.id, before)
+        })
+    }
+
     /// Done shopping: everything ticked bought at once, at last time's amount, shop and price.
     func doneShopping(_ chosen: [Item]) -> (String, () -> Void)? {
         guard !chosen.isEmpty else { return nil }
@@ -647,16 +783,18 @@ final class Store: ObservableObject {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("kitchtally-backup-\(f.string(from: Date())).json")
-        try Backup.encode(items, events, notes: notes).write(to: url, options: .atomic)
+        try Backup.encode(items, events, notes: notes, recipes: recipes).write(to: url, options: .atomic)
         return url
     }
 
     func importData(_ data: Data) throws -> Int {
         let contents = try Backup.decode(data)
         var nextItem = (items.map(\.id).max() ?? 0) + 1
+        var newIds: [Int64: Int64] = [:]
         for item in contents.items {
             var copy = item
             copy.id = nextItem
+            newIds[item.id] = nextItem
             items.append(copy)
             for e in contents.events where e.itemId == item.id {
                 var ev = e
@@ -670,6 +808,13 @@ final class Store: ObservableObject {
             copy.id = nextNoteId
             nextNoteId += 1
             notes.append(copy)
+        }
+        for r in contents.recipes {
+            var copy = r
+            copy.id = nextRecipeId
+            nextRecipeId += 1
+            copy.lines = r.lines.compactMap { l in newIds[l.itemId].map { RecipeLine(itemId: $0, needed: l.needed, amount: l.amount) } }
+            recipes.append(copy)
         }
         persist()
         return contents.items.count

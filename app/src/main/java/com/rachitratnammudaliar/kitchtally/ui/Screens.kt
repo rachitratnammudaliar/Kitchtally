@@ -145,10 +145,18 @@ fun detailLine(item: Item, state: PantryState, today: LocalDate): String {
 
 /** The To buy list as plain text, grouped by shop, for WhatsApp and the like. */
 fun shoppingText(state: PantryState, today: LocalDate): String {
-    val list = state.items.filter { onShoppingList(it, state, today) }
+    val planned = plannedNeeds(state)
+    val list = state.items.filter { onShoppingList(it, state, today) && it.id !in planned.map { n -> n.item.id } }
     val byShop = list.groupBy { Pantry.lastShop(state.entries(it.id)) }
     return buildString {
         append("Shopping list")
+        if (planned.isNotEmpty()) {
+            append("\n\nFor planned meals")
+            planned.forEach { n ->
+                val amount = Pantry.buyAmount(n.item.unitValue(), state.entries(n.item.id), n.item.packSize)
+                append("\n• ").append(n.item.name).append(" (").append(n.item.unitValue().label(amount)).append(") for ").append(n.recipes.joinToString { it.name })
+            }
+        }
         shopOrder(byShop.keys).forEach { shop ->
             append("\n\n").append(shop.ifEmpty { "Anywhere" })
             byShop[shop].orEmpty().sortedBy { it.name.lowercase() }.forEach { item ->
@@ -204,7 +212,7 @@ fun KitchtallyRoot(
     vm: PantryViewModel = viewModel(),
 ) {
     var route by rememberSaveable { mutableStateOf(startScreen) }
-    var tab by rememberSaveable { mutableStateOf(if (startScreen in listOf("shopping", "week")) startScreen else "pantry") }
+    var tab by rememberSaveable { mutableStateOf(if (startScreen in listOf("shopping", "week", "recipes")) startScreen else "pantry") }
     /** Debug screenshots can open the Cook box or an item's adjust box straight away. */
     val openCook = startScreen == "cook"
     val openAdjust = if (startScreen.startsWith("adjust:")) startScreen.removePrefix("adjust:").toLongOrNull() ?: 0L else 0L
@@ -264,6 +272,7 @@ fun KitchtallyRoot(
             onDone = { route = back.ifEmpty { "item:$id1" } },
         )
         "settings" -> SettingsScreen(vm = vm, currency = currency, onBack = { route = tab })
+        "recipe" -> EditRecipeScreen(vm = vm, state = state, id = id1, today = today, onDone = { route = tab })
         else -> MainTabs(
             vm = vm, state = state, tab = tab, today = today, currency = currency,
             onTab = { tab = it; route = it },
@@ -271,6 +280,7 @@ fun KitchtallyRoot(
             onAdd = { route = "edit:0" },
             onBuy = { back = tab; route = "buy:$it:0" },
             onSettings = { route = "settings" },
+            onEditRecipe = { route = "recipe:$it" },
             openCook = openCook,
             openAdjust = openAdjust,
             ticked = ticked,
@@ -291,6 +301,7 @@ private fun MainTabs(
     onAdd: () -> Unit,
     onBuy: (Long) -> Unit,
     onSettings: () -> Unit,
+    onEditRecipe: (Long) -> Unit = {},
     openCook: Boolean = false,
     openAdjust: Long = 0L,
     ticked: List<Long> = emptyList(),
@@ -299,9 +310,9 @@ private fun MainTabs(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
-    val toBuy = state?.items?.count { onShoppingList(it, state, today) } ?: 0
+    val toBuy = state?.let { toBuyCount(it, today) } ?: 0
     var cooking by rememberSaveable { mutableStateOf(openCook) }
-    val tickedNow = state?.let { s -> ticked.filter { id -> s.item(id)?.let { onShoppingList(it, s, today) } == true } }.orEmpty()
+    val tickedNow = state?.let { s -> val planned = plannedNeeds(s).map { it.item.id }.toSet(); ticked.filter { id -> s.item(id)?.let { onShoppingList(it, s, today) || id in planned } == true } }.orEmpty()
 
     if (cooking && state != null) {
         CookDialog(state, onDismiss = { cooking = false }) { chosen, shared ->
@@ -318,6 +329,7 @@ private fun MainTabs(
                         when (tab) {
                             "shopping" -> "Shopping list"
                             "week" -> "This week"
+                            "recipes" -> "Recipes"
                             else -> "Kitchtally"
                         },
                         fontWeight = FontWeight.SemiBold,
@@ -338,6 +350,7 @@ private fun MainTabs(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(selected = tab == "pantry", onClick = { onTab("pantry") }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("Pantry") })
+                NavigationBarItem(selected = tab == "recipes", onClick = { onTab("recipes") }, icon = { Text("🍲") }, label = { Text("Recipes") })
                 NavigationBarItem(
                     selected = tab == "shopping",
                     onClick = { onTab("shopping") },
@@ -354,6 +367,8 @@ private fun MainTabs(
         floatingActionButton = {
             if (tab == "pantry") {
                 FloatingActionButton(onClick = onAdd) { Icon(Icons.Default.Add, contentDescription = "Add item") }
+            } else if (tab == "recipes") {
+                FloatingActionButton(onClick = { onEditRecipe(0L) }) { Icon(Icons.Default.Add, contentDescription = "Add recipe") }
             } else if (tab == "shopping" && tickedNow.isNotEmpty() && state != null) {
                 ExtendedFloatingActionButton(
                     onClick = {
@@ -382,6 +397,7 @@ private fun MainTabs(
         when (tab) {
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
+            "recipes" -> RecipesScreen(vm, s, today, currency, snackbar, onEditRecipe, modifier)
             else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
         }
     }
@@ -444,7 +460,7 @@ private fun PantryList(
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
     val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
     val week = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst), anchor), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = { id -> state.item(id)?.category ?: "" })
-    val toBuy = state.items.count { onShoppingList(it, state, today) }
+    val toBuy = toBuyCount(state, today)
     val almostOut = state.items.count { !it.unsure && state.stock(it.id) > 0 && Pantry.status(state.entries(it.id), it.counting(), today) != StockStatus.OK }
 
     LazyColumn(
@@ -609,14 +625,20 @@ private fun ShoppingList(
 ) {
     val scope = rememberCoroutineScope()
     var newText by rememberSaveable { mutableStateOf("") }
-    val list = state.items.filter { onShoppingList(it, state, today) }
+    val planned = plannedNeeds(state)
+    val plannedIds = planned.map { it.item.id }.toSet()
+    val list = state.items.filter { onShoppingList(it, state, today) && it.id !in plannedIds }
     fun status(item: Item) = Pantry.status(state.entries(item.id), item.counting(), today)
-    // Grouped by where you usually buy each thing, so you finish one shop before the next.
-    val byShop = list.groupBy { Pantry.lastShop(state.entries(it.id)) }
+    val shopOf = { item: Item -> Pantry.lastShop(state.entries(item.id)) }
+    // Usually grouped by where you buy each thing. Once some things are ASAP or Anytime, grouped by that instead.
+    val byPriority = list.groupBy { it.buyPriority }
+    val sortInside = compareBy<Item>({ shopOf(it).ifEmpty { "~" }.lowercase() }, { status(it).ordinal }, { it.name.lowercase() })
+    val priorityTitles = listOf(0 to "⚡  ASAP", 1 to "📌  Priority", 2 to "🕐  Anytime")
+    val byShop = list.groupBy { shopOf(it) }
     val sections = shopOrder(byShop.keys).map { shop ->
         shop to byShop[shop].orEmpty().sortedWith(compareBy<Item> { status(it).ordinal }.thenBy { it.name.lowercase() })
     }
-    val estimate = list.sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id), it.packSize) ?: 0L }
+    val estimate = (list + planned.map { it.item }).sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id), it.packSize) ?: 0L }
     val hidden = state.items.filter { it.hiddenFromList && status(it) != StockStatus.OK }
 
     fun add() {
@@ -646,7 +668,7 @@ private fun ShoppingList(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (list.isEmpty() && state.notes.isEmpty()) {
+        if (list.isEmpty() && planned.isEmpty() && state.notes.isEmpty()) {
             item(key = "empty") {
                 Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("🛒", style = MaterialTheme.typography.displaySmall)
@@ -662,10 +684,10 @@ private fun ShoppingList(
             }
         } else {
             item(key = "summary") {
-                val count = list.size + state.notes.size
+                val count = list.size + planned.size + state.notes.size
                 Text(
                     "$count to buy" + (if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "") +
-                        if (list.isNotEmpty()) ". Tick what you bought, then tap Done shopping." else "",
+                        if (list.isNotEmpty() || planned.isNotEmpty()) ". Tick what you bought, then tap Done shopping." else "",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp),
@@ -688,68 +710,28 @@ private fun ShoppingList(
                 }
             }
         }
-        sections.forEach { (shop, items) ->
-            item(key = "shop-$shop") { SectionTitle(if (shop.isEmpty()) "🛒  Anywhere · ${items.size}" else "🏪  $shop · ${items.size}") }
-            items.forEach { row ->
-                item(key = "buy-${row.id}") {
-                    val entries = state.entries(row.id)
-                    val unit = row.unitValue()
-                    val buyAmount = Pantry.buyAmount(unit, entries, row.packSize)
-                    val expected = Pantry.expectedPriceMinor(unit, entries, row.packSize)
-                    val isTicked = row.id in ticked
-                    Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
-                        Column(Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(checked = isTicked, onCheckedChange = { onTick(row.id) })
-                                ItemImage(row.name, row.photoFile, size = 46.dp, category = row.category)
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                    Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    StockPill(stockLabel(row, Pantry.stock(entries)), status(row))
-                                    Text(
-                                        "Usually ${unit.label(buyAmount)}" + (expected?.let { " · ${Money.format(it, currency)}" } ?: ""),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                var menu by remember { mutableStateOf(false) }
-                                Box {
-                                    TextButton(onClick = { menu = true }) { Text("Not now") }
-                                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                        DropdownMenuItem(
-                                            text = { Text("Hide until I buy it") },
-                                            onClick = {
-                                                menu = false
-                                                if (row.refillNeeded && status(row) == StockStatus.OK) {
-                                                    vm.setRefillNeeded(row, false)
-                                                } else {
-                                                    vm.setHidden(row, true)
-                                                    scope.undoSnackbar(snackbar, "${row.name} hidden until you buy it again") { vm.setHidden(row, false) }
-                                                }
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Not sure to buy again") },
-                                            onClick = {
-                                                menu = false
-                                                vm.setUnsure(row, true)
-                                                scope.undoSnackbar(snackbar, "${row.name} moved to \"Not sure to buy again\"") { vm.setUnsure(row, false) }
-                                            },
-                                        )
-                                    }
-                                }
-                                TextButton(onClick = { onBuy(row.id) }) { Text("Price & shop") }
-                                FilledTonalButton(onClick = {
-                                    vm.quickBuy(state, row) { buy ->
-                                        scope.undoSnackbar(snackbar, "Bought ${unit.label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
-                                    }
-                                }) { Text("Bought") }
-                            }
-                        }
-                    }
+        if (planned.isNotEmpty()) {
+            item(key = "planned-title") { SectionTitle("🍳  For planned meals · ${planned.size}") }
+            planned.forEach { need ->
+                item(key = "planned-${need.item.id}") {
+                    val reason = "for " + need.recipes.joinToString(", ") { r -> r.name + if (r.plannedDay > 0) " · " + Recipes.planLabel(r.plannedDay, today) else "" } +
+                        if (need.needed) "" else " (optional)"
+                    BuyCard(vm, state, need.item, currency, ticked, onTick, onOpen, onBuy, snackbar, reason)
                 }
+            }
+        }
+        if (byPriority.keys.size > 1) {
+            priorityTitles.forEach { (priority, title) ->
+                val items = byPriority[priority].orEmpty().sortedWith(sortInside)
+                if (items.isNotEmpty()) {
+                    item(key = "prio-$priority") { SectionTitle("$title · ${items.size}") }
+                    items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null, shopOf(row)) } }
+                }
+            }
+        } else {
+            sections.forEach { (shop, items) ->
+                item(key = "shop-$shop") { SectionTitle(if (shop.isEmpty()) "🛒  Anywhere · ${items.size}" else "🏪  $shop · ${items.size}") }
+                items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null) } }
             }
         }
         if (hidden.isNotEmpty()) {
@@ -763,6 +745,89 @@ private fun ShoppingList(
             }
         }
     }
+}
+
+/** One thing on the To buy list, with its tick box and buttons. [reason] says why it's there, e.g. a planned meal. */
+@Composable
+private fun BuyCard(
+    vm: PantryViewModel,
+    state: PantryState,
+    row: Item,
+    currency: String,
+    ticked: List<Long>,
+    onTick: (Long) -> Unit,
+    onOpen: (Long) -> Unit,
+    onBuy: (Long) -> Unit,
+    snackbar: SnackbarHostState,
+    reason: String?,
+    shop: String = "",
+) {
+    val scope = rememberCoroutineScope()
+    fun status(item: Item) = Pantry.status(state.entries(item.id), item.counting(), LocalDate.now())
+        val entries = state.entries(row.id)
+        val unit = row.unitValue()
+        val buyAmount = Pantry.buyAmount(unit, entries, row.packSize)
+        val expected = Pantry.expectedPriceMinor(unit, entries, row.packSize)
+        val isTicked = row.id in ticked
+        Card(onClick = { onOpen(row.id) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = isTicked, onCheckedChange = { onTick(row.id) })
+                    ItemImage(row.name, row.photoFile, size = 46.dp, category = row.category)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(row.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        StockPill(stockLabel(row, Pantry.stock(entries)), status(row))
+                        Text(
+                            "Usually ${unit.label(buyAmount)}" + (expected?.let { " · ${Money.format(it, currency)}" } ?: "") + (shop.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (reason != null) {
+                            Text("🍳  $reason", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { menu = true }) { Text("More") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            listOf(0 to "Move to ASAP", 1 to "Move to Priority", 2 to "Move to Anytime").filter { it.first != row.buyPriority }.forEach { (priority, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = { menu = false; vm.setBuyPriority(row, priority) })
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Hide until I buy it") },
+                                onClick = {
+                                    menu = false
+                                    if (row.refillNeeded && status(row) == StockStatus.OK) {
+                                        vm.setRefillNeeded(row, false)
+                                    } else {
+                                        vm.setHidden(row, true)
+                                        scope.undoSnackbar(snackbar, "${row.name} hidden until you buy it again") { vm.setHidden(row, false) }
+                                    }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Not sure to buy again") },
+                                onClick = {
+                                    menu = false
+                                    vm.setUnsure(row, true)
+                                    scope.undoSnackbar(snackbar, "${row.name} moved to \"Not sure to buy again\"") { vm.setUnsure(row, false) }
+                                },
+                            )
+                        }
+                    }
+                    TextButton(onClick = { onBuy(row.id) }) { Text("Price & shop") }
+                    FilledTonalButton(onClick = {
+                        vm.quickBuy(state, row) { buy ->
+                            scope.undoSnackbar(snackbar, "Bought ${unit.label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
+                        }
+                    }) { Text("Bought") }
+                }
+            }
+        }
+
 }
 
 @Composable

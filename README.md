@@ -73,7 +73,7 @@ With a free Apple ID the app must be refreshed every 7 days (AltStore does this 
 - **Tick as you shop, then Done shopping** logs everything you bought in one tap
 - **Share** the list as text to WhatsApp or anywhere
 - Type anything at the top, like candles or foil. Typing a pantry item's name marks that item instead
-- **Not now** hides an item until you next buy it; **Not sure to buy again** keeps it off the list for good
+- **More** moves an item to ASAP, Priority or Anytime, and **Hide until I buy it** hides an item until you next buy it; **Not sure to buy again** keeps it off the list for good
 - An estimate of the total at last prices
 
 **Weekly** (seven days from the day you choose, Monday by default)

@@ -355,4 +355,24 @@ class PantryTest {
         assertEquals(300L, week.cravingMinor)
         assertEquals(500L, week.spentMinor)
     }
+
+    @Test
+    fun recipesShowWhatIsMissing() {
+        val stock = mapOf(1L to 1.0, 2L to 0.0, 3L to 0.5)
+        val of = { id: Long -> stock[id] ?: 0.0 }
+        val chole = listOf(RecipeLine(1, true, 1.0), RecipeLine(2, false, 0.0))
+        assertEquals(RecipeStatus.MISSING_OPTIONAL, Recipes.status(chole, of))
+        assertEquals(listOf(2L), Recipes.missing(chole, of, false).map { it.itemId })
+        assertEquals(RecipeStatus.READY, Recipes.status(listOf(RecipeLine(1, true, 1.0), RecipeLine(3, true, 0.5)), of))
+        // Not enough of a needed thing counts as missing, and so does an empty one.
+        assertEquals(RecipeStatus.MISSING, Recipes.status(listOf(RecipeLine(3, true, 1.0)), of))
+        assertEquals(RecipeStatus.MISSING, Recipes.status(listOf(RecipeLine(2, true, 0.0)), of))
+    }
+
+    @Test
+    fun recipeCostComesFromLastPrices() {
+        val lines = listOf(RecipeLine(1, true, 2.0), RecipeLine(2, true, 0.0))
+        assertEquals(400L, Recipes.cost(lines) { if (it == 1L) 200.0 else null })
+        assertEquals(null, Recipes.cost(lines) { null })
+    }
 }

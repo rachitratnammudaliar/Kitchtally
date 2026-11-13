@@ -47,9 +47,18 @@ func shopOrder(_ shops: [String]) -> [String] {
 /// The To buy list as text, grouped by shop, for WhatsApp and the like.
 @MainActor
 func shoppingText(_ store: Store, _ today: Day) -> String {
-    let list = store.items.filter { store.onShoppingList($0, today) }
+    let planned = store.plannedNeeds()
+    let plannedIds = Set(planned.map { $0.item.id })
+    let list = store.items.filter { store.onShoppingList($0, today) && !plannedIds.contains($0.id) }
     let byShop = Dictionary(grouping: list) { Pantry.lastShop(store.entries($0.id)) }
     var text = "Shopping list"
+    if !planned.isEmpty {
+        text += "\n\nFor planned meals"
+        for n in planned {
+            let amount = Pantry.buyAmount(n.item.unitValue, store.entries(n.item.id), packSize: n.item.packSize)
+            text += "\n• \(n.item.name) (\(n.item.unitValue.label(amount))) for \(n.recipes.map(\.name).joined(separator: ", "))"
+        }
+    }
     for shop in shopOrder(Array(byShop.keys)) {
         text += "\n\n" + (shop.isEmpty ? "Anywhere" : shop)
         for item in (byShop[shop] ?? []).sorted(by: { $0.name.lowercased() < $1.name.lowercased() }) {

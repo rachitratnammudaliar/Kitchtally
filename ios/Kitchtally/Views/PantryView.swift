@@ -97,7 +97,7 @@ struct PantryView: View {
 
     private var summary: some View {
         let week = Pantry.week(Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor), store.entriesByItem, categoryOf: { id in store.item(id)?.category ?? "" }, isLong: { store.isLong($0) })
-        let toBuy = store.items.filter { store.onShoppingList($0, today) }.count + store.notes.count
+        let toBuy = Set(store.items.filter { store.onShoppingList($0, today) }.map(\.id)).union(store.plannedNeeds().map { $0.item.id }).count + store.notes.count
         let almostOut = store.items.filter { !$0.unsure && store.stock($0.id) > 0 && store.status($0, today) != .ok }.count
         return Section {
             VStack(alignment: .leading, spacing: 4) {

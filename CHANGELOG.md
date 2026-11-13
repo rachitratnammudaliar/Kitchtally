@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.8.0
+- New **Recipes** tab between Pantry and To buy. Add a dish, pick its ingredients from your pantry, mark each Needed or Optional, and set the usual amount. One cook makes 4 meals for you, or 2 if you share (you can change both numbers).
+- Recipes are coloured by what you have: green can cook now, amber is only missing something optional, red is missing a needed item. "What can I cook?" filters to what's possible. Each recipe shows about how much a meal costs, from your last prices.
+- Tap a recipe to cook it: change the amounts (25 / 50 / 75 / All, or type) and the stock goes down by that much. Undo is available. Missing items can be added to To buy from there.
+- **Meal planner:** plan a recipe for a day or "this week". What's missing for planned meals shows at the top of To buy, with the reason ("for Chole · Tue"). Meals you don't plan add nothing.
+- To buy now has **ASAP, Priority and Anytime** sections. Use "More" on an item to move it. They reset to Priority once you buy the item.
+- Database moves to version 7; your data and backups carry over.
+
 ## 1.7.0
 - New "Bought on a craving" switch on a purchase. Weekly shows how much went on cravings (could have skipped).
 - New "No need to buy again" switch on an item. It never appears on the shopping list and sits in its own group at the bottom of Pantry.

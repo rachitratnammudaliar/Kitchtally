@@ -22,6 +22,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
+import com.rachitratnammudaliar.kitchtally.domain.RecipeLine
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 
@@ -61,6 +62,9 @@ data class Item(
     // Added in database version 6 (app 1.7.0).
     /** No need to buy again: never on the shopping list, shown in its own group. */
     val noRebuy: Boolean = false,
+    // Added in database version 7 (app 1.8.0).
+    /** Where it sits on To buy: 0 ASAP, 1 Priority (usual), 2 Anytime. Back to 1 once bought. */
+    val buyPriority: Int = 1,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -148,6 +152,30 @@ interface PantryDao {
     @Query("UPDATE items SET noRebuy = :on, refillNeeded = CASE WHEN :on THEN 0 ELSE refillNeeded END, unsure = CASE WHEN :on THEN 0 ELSE unsure END WHERE id = :id")
     suspend fun setNoRebuy(id: Long, on: Boolean)
 
+    @Query("SELECT * FROM recipes ORDER BY name COLLATE NOCASE")
+    fun observeRecipes(): Flow<List<Recipe>>
+
+    @Query("SELECT * FROM recipes")
+    suspend fun recipes(): List<Recipe>
+
+    @Query("SELECT * FROM recipes WHERE id = :id")
+    suspend fun recipe(id: Long): Recipe?
+
+    @Insert
+    suspend fun insert(recipe: Recipe): Long
+
+    @Update
+    suspend fun update(recipe: Recipe)
+
+    @Delete
+    suspend fun delete(recipe: Recipe)
+
+    @Query("UPDATE recipes SET plannedDay = :day WHERE id = :id")
+    suspend fun setPlanned(id: Long, day: Long)
+
+    @Query("UPDATE items SET buyPriority = :priority WHERE id = :id")
+    suspend fun setBuyPriority(id: Long, priority: Int)
+
     @Query("SELECT * FROM items")
     suspend fun items(): List<Item>
 
@@ -186,7 +214,7 @@ interface PantryDao {
     suspend fun setCountsFrom(ids: List<Long>, day: Long?)
 
     /** After buying: off the manual list, and shown again if it was hidden. */
-    @Query("UPDATE items SET refillNeeded = 0, hiddenFromList = 0 WHERE id = :id")
+    @Query("UPDATE items SET refillNeeded = 0, hiddenFromList = 0, buyPriority = 1 WHERE id = :id")
     suspend fun clearRefill(id: Long)
 
     @Transaction
@@ -246,7 +274,41 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class], version = 6, exportSchema = false)
+/** A dish: ingredients picked from the pantry, how many meals one cook makes, and when it's planned. */
+@Entity(tableName = "recipes")
+data class Recipe(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    /** Meals from one cook when you eat it yourself. */
+    val mealsAlone: Int = 4,
+    /** Meals from one cook when you share it. */
+    val mealsShared: Int = 2,
+    /** The ingredients as JSON: [{"i":itemId,"n":needed,"a":amount}]. */
+    val lines: String = "[]",
+    /** -1 not planned, 0 some day this week, otherwise the epoch day it's planned for. */
+    val plannedDay: Long = -1,
+)
+
+fun Recipe.lineList(): List<RecipeLine> = runCatching {
+    val array = org.json.JSONArray(lines)
+    (0 until array.length()).map { i ->
+        val o = array.getJSONObject(i)
+        RecipeLine(o.getLong("i"), o.optBoolean("n", true), o.optDouble("a", 0.0))
+    }
+}.getOrDefault(emptyList())
+
+fun encodeLines(lines: List<RecipeLine>): String =
+    org.json.JSONArray(lines.map { org.json.JSONObject().put("i", it.itemId).put("n", it.needed).put("a", it.amount) }).toString()
+
+/** Version 6 -> 7 (app 1.7 -> 1.8.0): recipes, the meal plan, and ASAP / Priority / Anytime on To buy. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS recipes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL, mealsAlone INTEGER NOT NULL, mealsShared INTEGER NOT NULL, lines TEXT NOT NULL, plannedDay INTEGER NOT NULL)")
+        db.execSQL("ALTER TABLE items ADD COLUMN buyPriority INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 7, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -259,7 +321,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .build().also { instance = it }
             }
     }

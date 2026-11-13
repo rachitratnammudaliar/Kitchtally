@@ -21,11 +21,15 @@ struct RootView: View {
     private let timer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        let toBuy = store.items.filter { store.onShoppingList($0, today) }.count + store.notes.count
+        let plannedIds = Set(store.plannedNeeds().map { $0.item.id })
+        let toBuy = Set(store.items.filter { store.onShoppingList($0, today) }.map(\.id)).union(plannedIds).count + store.notes.count
         TabView(selection: $tab) {
             PantryView(today: today, tab: $tab)
                 .tabItem { Label("Pantry", systemImage: "house") }
                 .tag(0)
+            RecipesView(today: today)
+                .tabItem { Label("Recipes", systemImage: "fork.knife") }
+                .tag(3)
             ShoppingView(today: today)
                 .tabItem { Label("To buy", systemImage: "cart") }
                 .badge(toBuy)

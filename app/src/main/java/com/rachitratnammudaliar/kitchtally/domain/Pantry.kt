@@ -635,3 +635,48 @@ object Badges {
     fun initial(name: String): String =
         name.trim().firstOrNull { it.isLetterOrDigit() }?.uppercaseChar()?.toString() ?: "?"
 }
+
+/** One ingredient of a recipe: an item from the pantry, needed or optional, with its usual amount. */
+data class RecipeLine(val itemId: Long, val needed: Boolean = true, val amount: Double = 0.0)
+
+enum class RecipeStatus { READY, MISSING_OPTIONAL, MISSING }
+
+object Recipes {
+    const val NOT_PLANNED = -1L
+    const val ANY_DAY = 0L
+
+    /** Enough of it in the pantry for one cook (a little is enough when no amount is set). */
+    fun has(line: RecipeLine, stock: Double): Boolean = stock + 1e-9 >= (if (line.amount > 0) line.amount else 0.001)
+
+    fun missing(lines: List<RecipeLine>, stockOf: (Long) -> Double, needed: Boolean): List<RecipeLine> =
+        lines.filter { it.needed == needed && !has(it, stockOf(it.itemId)) }
+
+    fun status(lines: List<RecipeLine>, stockOf: (Long) -> Double): RecipeStatus = when {
+        missing(lines, stockOf, true).isNotEmpty() -> RecipeStatus.MISSING
+        missing(lines, stockOf, false).isNotEmpty() -> RecipeStatus.MISSING_OPTIONAL
+        else -> RecipeStatus.READY
+    }
+
+    /** Roughly what one cook costs, from the last price paid per unit. Null when nothing has a price. */
+    fun cost(lines: List<RecipeLine>, unitPriceMinor: (Long) -> Double?): Long? {
+        var total = 0.0
+        var any = false
+        lines.filter { it.amount > 0 }.forEach { line ->
+            unitPriceMinor(line.itemId)?.let { total += it * line.amount; any = true }
+        }
+        return if (any) Math.round(total) else null
+    }
+
+    /** Price per unit from the last priced purchase; null if there isn't one. */
+    fun unitPriceMinor(entries: List<Entry>): Double? =
+        Pantry.lastPriced(entries)?.let { e -> e.priceMinor?.takeIf { e.quantity > 0 }?.let { it / e.quantity } }
+
+    /** "Mon 16" for a planned day, "this week" for any day. */
+    fun planLabel(plannedDay: Long, today: LocalDate): String = when {
+        plannedDay == NOT_PLANNED -> "Not planned"
+        plannedDay == ANY_DAY -> "This week"
+        plannedDay == today.toEpochDay() -> "Today"
+        plannedDay == today.toEpochDay() + 1 -> "Tomorrow"
+        else -> LocalDate.ofEpochDay(plannedDay).let { it.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()) + " " + it.dayOfMonth }
+    }
+}
