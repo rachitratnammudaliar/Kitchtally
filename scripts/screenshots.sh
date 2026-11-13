@@ -41,6 +41,7 @@ shot pantry home
 shot item:6 item
 shot shopping shopping
 shot week week
+shot recipes recipes
 shot buy:3:0 purchase
 shot edit:6 edit
 shot cook cook

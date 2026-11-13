@@ -551,6 +551,11 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
             add("Dishwashing liquid", "Household", QtyUnit.LEVEL, Life.LONG, ev(b, 40, 1.0, 149, "Maxima"), ev(u, 1, 0.25))
             add("Instant noodles", "Staples", QtyUnit.PACKET, Life.LONG,
                 ev(b, 20, 5.0, 295, "Maxima"), ev(u, 15, 2.0), ev(u, 8, 2.0), ev(u, 3), unsure = true)
+            // Two sample recipes, one you can cook and one that's planned and missing something.
+            val byName = dao.items().associateBy { it.name }
+            fun line(name: String, needed: Boolean, amount: Double) = byName[name]?.let { RecipeLine(it.id, needed, amount) }
+            dao.insert(Recipe(name = "Spaghetti with tomatoes", lines = encodeLines(listOfNotNull(line("Spaghetti", true, 0.25), line("Tomatoes", true, 2.0), line("Red onion", false, 1.0)))))
+            dao.insert(Recipe(name = "Chicken rice", lines = encodeLines(listOfNotNull(line("Chicken", true, 0.5), line("Basmati rice", true, 0.3), line("Face cream", false, 0.0))), plannedDay = Recipes.ANY_DAY))
             dao.insert(ShoppingNote(text = "Birthday candles"))
             dao.insert(ShoppingNote(text = "Aluminium foil"))
         }
