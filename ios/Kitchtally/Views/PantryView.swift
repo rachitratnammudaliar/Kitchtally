@@ -10,6 +10,7 @@ struct PantryView: View {
     @State private var adding = false
     @State private var showSettings = false
     @State private var cooking = false
+    @State private var showNew = false
     @State private var undo: UndoState?
     @State private var path: [Int64] = []
 
@@ -30,6 +31,19 @@ struct PantryView: View {
                         .padding(.vertical, 16)
                     }
                 } else {
+                    if store.backupDue(today) {
+                        Section {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("💾  Back up your pantry").font(.headline)
+                                Text("It's been a month. Your data lives only on this phone. Settings → Backup saves a copy you can keep.").font(.caption).foregroundColor(.secondary)
+                                HStack {
+                                    Spacer()
+                                    Button("Later") { store.snoozeBackup(today) }.buttonStyle(.borderless)
+                                    Button("Open Settings") { showSettings = true }.buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    }
                     let categories = Categories.ordered(store.usedCategories)
                     let query = search.trimmingCharacters(in: .whitespaces).lowercased()
                     let shown = store.items.filter {
@@ -86,6 +100,12 @@ struct PantryView: View {
                     Button { adding = true } label: { Image(systemName: "plus") }.accessibilityLabel("Add item")
                 }
             }
+            .onAppear { if store.shouldShowWhatsNew() { showNew = true } }
+            .alert("What's new", isPresented: $showNew) {
+                Button("Got it") { store.markWhatsNewSeen() }
+            } message: {
+                Text("🍲 Recipes tab: cook a dish and the stock goes down for you. Plan meals and what's missing lands on To buy.\n\n😌 Not this week: skip things on To buy without them nagging you. Longer breaks too.\n\n🍫 Treats & fun: chocolates and soda wait until Thursday, ready for the weekend.\n\n🗓️ A new week asks \"Still want these?\" so your list matches what you feel like.")
+            }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $cooking) {
@@ -133,14 +153,16 @@ struct ItemRow: View {
 
     var body: some View {
         let stock = store.stock(item.id)
-        let status = store.status(item, today)
+        let skip = store.skipping(item, today) || store.weekendTreatRest(item, today)
+        // Skipping it for now: no red or amber warning, just a quiet tag.
+        let status: StockStatus = skip ? .ok : store.status(item, today)
         let unit = item.unitValue
         HStack(spacing: 12) {
             HStack(spacing: 12) {
                 ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 50)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name).font(.headline).lineLimit(1)
-                    StockPill(text: stockLabel(item, stock) + (item.refillNeeded && status == .ok ? " · refill" : "") + "  ±", status: status) { adjusting = true }
+                    StockPill(text: stockLabel(item, stock) + (skip && store.status(item, today) != .ok ? " · skipping" : (item.refillNeeded && status == .ok ? " · refill" : "")) + "  ±", status: status) { adjusting = true }
                     let alert = stock > 0 && status != .ok
                     Text(detailLine(item, store, today)).font(.caption)
                         .fontWeight(alert ? .medium : .regular)

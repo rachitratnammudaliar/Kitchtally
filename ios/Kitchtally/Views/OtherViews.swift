@@ -12,6 +12,9 @@ struct ShoppingView: View {
     /// Items ticked while shopping, for "Done shopping".
     @State private var ticked = Set<Int64>()
     @State private var askNewWeek = false
+    @State private var reviewing = false
+    @State private var confirmSkipAll = false
+    @State private var reviewSkips = Set<Int64>()
 
     private func add() {
         let text = newText.trimmingCharacters(in: .whitespaces)
@@ -30,6 +33,12 @@ struct ShoppingView: View {
         let byPriority = Dictionary(grouping: list) { $0.buyPriority }
         let priorityTitles: [(Int, String)] = [(0, "⚡  ASAP"), (1, "📌  Priority"), (2, "🕐  Anytime")]
         let tickedNow = (list + planned.map(\.item)).filter { ticked.contains($0.id) }
+        let thisWeekStart = Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor)
+        // Skipping something "this week" lasts until the next week starts.
+        let nextWeekDay = thisWeekStart.epochDay + 7
+        let skipped = store.items.filter { store.skippedFromList($0, today) && !plannedIds.contains($0.id) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        let leftToSkip = list.filter { !ticked.contains($0.id) }
+        let needsReview = !list.isEmpty && store.weekReviewDay != thisWeekStart.epochDay
         let estimate = (list + planned.map(\.item)).reduce(Int64(0)) { $0 + (Pantry.expectedPriceMinor($1.unitValue, store.entries($1.id), packSize: $1.packSize) ?? 0) }
         let hidden = store.items.filter { $0.hiddenFromList && store.status($0, today) != .ok }
 
@@ -59,9 +68,24 @@ struct ShoppingView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 24)
                 } else {
+                    if needsReview {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("🗓️  New week: still want these \(list.count)?").font(.headline)
+                            Text("Skip what you don't feel like buying this week. They wait in their own section.").font(.caption).foregroundColor(.secondary)
+                            HStack {
+                                Spacer()
+                                Button("Keep all") { store.markWeekReviewed(thisWeekStart.epochDay) }.buttonStyle(.borderless)
+                                Button("Review") { reviewSkips = []; reviewing = true }.buttonStyle(.borderless)
+                            }
+                        }
+                    }
                     Text("\(list.count + planned.count + store.notes.count) to buy" + (estimate > 0 ? " · about \(Money.format(estimate, store.currency)) at last prices" : "")
                          + (list.isEmpty && planned.isEmpty ? "" : ". Tick what you bought, then tap Done shopping."))
                         .font(.subheadline).foregroundColor(.secondary)
+                    if leftToSkip.count > 1 {
+                        Button("Not this week: skip all that's left (\(leftToSkip.count))") { confirmSkipAll = true }
+                            .font(.subheadline)
+                    }
                 }
 
                 if !store.notes.isEmpty {
@@ -83,7 +107,7 @@ struct ShoppingView: View {
                 if !planned.isEmpty {
                     Section("🍳  For planned meals · \(planned.count)") {
                         ForEach(planned, id: \.item.id) { need in
-                            row(need.item, reason: "for " + need.recipes.map { r in r.name + (r.plannedDay > 0 ? " · " + Recipes.planLabel(r.plannedDay, today) : "") }.joined(separator: ", ") + (need.needed ? "" : " (optional)"))
+                            row(need.item, reason: "for " + need.recipes.map { r in r.name + (r.plannedDay > 0 ? " · " + Recipes.planLabel(r.plannedDay, today) : "") }.joined(separator: ", ") + (need.needed ? "" : " (optional)"), nextWeekDay: nextWeekDay)
                         }
                     }
                 }
@@ -98,7 +122,7 @@ struct ShoppingView: View {
                         }
                         if !rows.isEmpty {
                             Section("\(title) · \(rows.count)") {
-                                ForEach(rows) { item in row(item, shop: Pantry.lastShop(store.entries(item.id))) }
+                                ForEach(rows) { item in row(item, shop: Pantry.lastShop(store.entries(item.id)), nextWeekDay: nextWeekDay) }
                             }
                         }
                     }
@@ -109,7 +133,30 @@ struct ShoppingView: View {
                             return sa != sb ? sa < sb : a.name.lowercased() < b.name.lowercased()
                         }
                         Section(shop.isEmpty ? "🛒  Anywhere · \(rows.count)" : "🏪  \(shop) · \(rows.count)") {
-                            ForEach(rows) { item in row(item) }
+                            ForEach(rows) { item in row(item, nextWeekDay: nextWeekDay) }
+                        }
+                    }
+                }
+
+                if !skipped.isEmpty {
+                    Section("😌  Skipping · \(skipped.count)") {
+                        ForEach(skipped) { item in
+                            let weekend = !store.skipping(item, today) && store.weekendTreatRest(item, today)
+                            HStack(spacing: 12) {
+                                ItemImage(name: item.name, photoFile: item.photoFile, category: item.category, size: 40)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name).font(.subheadline).lineLimit(1)
+                                    Text(weekend ? "Weekend treat · comes up on Thursday"
+                                         : item.skipUntil >= 9_000_000 ? "On a break until you add it back"
+                                         : "Skipping · back " + Recipes.planLabel(item.skipUntil, today))
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                Spacer(minLength: 4)
+                                Button("Add back") {
+                                    if weekend { store.setRefillNeeded(item.id, true) } else { store.skipItems([item], until: 0) }
+                                }
+                                .buttonStyle(.borderless)
+                            }
                         }
                     }
                 }
@@ -147,6 +194,48 @@ struct ShoppingView: View {
             .navigationDestination(for: Int64.self) { id in ItemView(id: id, today: today) }
             .sheet(item: $buying) { target in PurchaseView(target: target, today: today) }
             .undoOverlay($undo)
+            .alert("Skip all that's left?", isPresented: $confirmSkipAll) {
+                Button("Skip them") {
+                    let chosen = leftToSkip
+                    store.markWeekReviewed(thisWeekStart.epochDay)
+                    let undoSkip = store.skipItems(chosen, until: nextWeekDay)
+                    showUndo($undo, "Skipping \(chosen.count) items this week", undoSkip)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(leftToSkip.count) items you haven't ticked wait in the Skipping section until next week. Add any back whenever you like.")
+            }
+            .sheet(isPresented: $reviewing) {
+                NavigationStack {
+                    List {
+                        Section(footer: Text("Switch on the ones you don't feel like buying this week.")) {
+                            ForEach(list.sorted { $0.name.lowercased() < $1.name.lowercased() }) { item in
+                                Toggle(isOn: Binding(get: { reviewSkips.contains(item.id) }, set: { on in
+                                    if on { reviewSkips.insert(item.id) } else { reviewSkips.remove(item.id) }
+                                })) {
+                                    Text(item.name)
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("Still want these?")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { reviewing = false } }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                reviewing = false
+                                store.markWeekReviewed(thisWeekStart.epochDay)
+                                let chosen = list.filter { reviewSkips.contains($0.id) }
+                                if !chosen.isEmpty {
+                                    let undoSkip = store.skipItems(chosen, until: nextWeekDay)
+                                    showUndo($undo, "Skipping \(chosen.count) items this week", undoSkip)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             .alert("Start the new week now?", isPresented: $askNewWeek) {
                 Button("Start") { store.startNewWeek(today) }
                 Button("Not now", role: .cancel) {}
@@ -156,7 +245,7 @@ struct ShoppingView: View {
         }
     }
 
-    private func row(_ item: Item, reason: String? = nil, shop shopName: String = "") -> some View {
+    private func row(_ item: Item, reason: String? = nil, shop shopName: String = "", nextWeekDay: Int = 0) -> some View {
         let entries = store.entries(item.id)
         let unit = item.unitValue
         let expected = Pantry.expectedPriceMinor(unit, entries, packSize: item.packSize)
@@ -196,6 +285,14 @@ struct ShoppingView: View {
                 Menu("More") {
                     ForEach([(0, "Move to ASAP"), (1, "Move to Priority"), (2, "Move to Anytime")].filter { $0.0 != item.buyPriority }, id: \.0) { priority, label in
                         Button(label) { store.setBuyPriority(item.id, priority) }
+                    }
+                    if nextWeekDay > 0 {
+                        ForEach([(nextWeekDay, "Not this week"), (Day.today().epochDay + 14, "Take a break · 2 weeks"), (Day.today().epochDay + 28, "Take a break · 4 weeks"), (9_999_999, "Take a break · until I add it back")], id: \.1) { until, label in
+                            Button(label) {
+                                let undoSkip = store.skipItems([item], until: until)
+                                showUndo($undo, "\(item.name): \(label.lowercased())", undoSkip)
+                            }
+                        }
                     }
                     Button("Hide until I buy it") {
                         if item.refillNeeded && status == .ok {

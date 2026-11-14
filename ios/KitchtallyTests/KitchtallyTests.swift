@@ -343,4 +343,10 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(Recipes.cost(lines, unitPriceMinor: { $0 == 1 ? 200 : nil }), 400)
         XCTAssertNil(Recipes.cost(lines, unitPriceMinor: { _ in nil }))
     }
+
+    func testTreatsAreAWeekendCategory() {
+        XCTAssertTrue(Categories.isWeekendTreat("Treats & fun"))
+        XCTAssertFalse(Categories.isWeekendTreat("Snacks"))
+        XCTAssertEqual(Suggestions.forName("Dairy Milk chocolate")?.category, "Treats & fun")
+    }
 }

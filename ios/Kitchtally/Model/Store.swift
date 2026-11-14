@@ -30,6 +30,8 @@ struct Item: Identifiable, Equatable {
     var noRebuy: Bool = false
     /// Where it sits on To buy: 0 ASAP, 1 Priority (usual), 2 Anytime. Back to 1 once bought.
     var buyPriority: Int = 1
+    /// Skipping it on To buy until this epoch day (not this week, or a break). 0 = not skipping.
+    var skipUntil: Int = 0
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var counting: Counting {
@@ -112,7 +114,7 @@ enum Backup {
                 "ref": i.id, "name": i.name, "category": i.category, "unit": i.unit, "life": i.life,
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
                 "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
-                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy, "buyPriority": i.buyPriority,
+                "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy, "buyPriority": i.buyPriority, "skipUntil": i.skipUntil,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -131,7 +133,7 @@ enum Backup {
             ["name": r.name, "mealsAlone": r.mealsAlone, "mealsShared": r.mealsShared, "plannedDay": r.plannedDay,
              "lines": r.lines.map { ["i": $0.itemId, "n": $0.needed, "a": $0.amount] as [String: Any] }]
         }
-        let root: [String: Any] = ["format": format, "version": 6, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson]
+        let root: [String: Any] = ["format": format, "version": 7, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -177,7 +179,8 @@ enum Backup {
                 mealsPerUnit: max(0, min(number(o, "mealsPerUnit")?.doubleValue.nanToZero ?? 0, 10_000)),
                 lowInMeals: (o["lowInMeals"] as? Bool) ?? false,
                 noRebuy: (o["noRebuy"] as? Bool) ?? false,
-                buyPriority: min(2, max(0, number(o, "buyPriority")?.intValue ?? 1))
+                buyPriority: min(2, max(0, number(o, "buyPriority")?.intValue ?? 1)),
+                skipUntil: max(0, number(o, "skipUntil")?.intValue ?? 0)
             ))
         }
         let refs = Set(items.map(\.id))
@@ -355,7 +358,78 @@ final class Store: ObservableObject {
     func status(_ item: Item, _ today: Day) -> StockStatus { Pantry.status(entries(item.id), item.counting, today) }
     /// On the list when marked, out or running low, unless hidden until it's bought again.
     func onShoppingList(_ item: Item, _ today: Day) -> Bool {
+        needsBuying(item, today) && !restingFromList(item, today)
+    }
+
+    /// Would be on the list, ignoring any skip or weekend rest.
+    private func needsBuying(_ item: Item, _ today: Day) -> Bool {
         !item.unsure && !item.noRebuy && (item.refillNeeded || (!item.hiddenFromList && status(item, today) != .ok))
+    }
+
+    func skipping(_ item: Item, _ today: Day) -> Bool { item.skipUntil > today.epochDay }
+
+    /// Chocolates, soda and the like only come up from Thursday, unless you marked them as needing a refill.
+    func weekendTreatRest(_ item: Item, _ today: Day) -> Bool {
+        Categories.isWeekendTreat(item.category) && !item.refillNeeded && (today.epochDay + 3) % 7 <= 2
+    }
+
+    /// Skipping it for now, or a weekend treat before Thursday: it waits in its own section on To buy.
+    func restingFromList(_ item: Item, _ today: Day) -> Bool { skipping(item, today) || weekendTreatRest(item, today) }
+
+    /// Out or low, but you're skipping it (or it's a weekend treat before Thursday).
+    func skippedFromList(_ item: Item, _ today: Day) -> Bool { needsBuying(item, today) && restingFromList(item, today) }
+
+    /// Skip these on To buy until [until] (an epoch day; 0 brings them back). Returns an Undo.
+    @discardableResult
+    func skipItems(_ chosen: [Item], until: Int) -> () -> Void {
+        let before = Dictionary(uniqueKeysWithValues: chosen.map { ($0.id, $0.skipUntil) })
+        applySkips(Dictionary(uniqueKeysWithValues: chosen.map { ($0.id, until) }))
+        return { [weak self] in self?.applySkips(before) }
+    }
+
+    private func applySkips(_ map: [Int64: Int]) {
+        items = items.map { i in
+            var copy = i
+            if let v = map[i.id] { copy.skipUntil = v }
+            return copy
+        }
+        persist()
+    }
+
+    // MARK: Gentle reminders
+
+    /// The week (its first day) whose To buy list you last went through with "Still want these?".
+    var weekReviewDay: Int { UserDefaults.standard.integer(forKey: "week_review_day") }
+
+    func markWeekReviewed(_ weekStart: Int) {
+        UserDefaults.standard.set(weekStart, forKey: "week_review_day")
+        objectWillChange.send()
+    }
+
+    /// True once after an update, so the app can say what changed. A fresh install shows nothing.
+    func shouldShowWhatsNew() -> Bool {
+        let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let seen = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
+        if seen.isEmpty { UserDefaults.standard.set(current, forKey: "last_seen_version"); return false }
+        return seen != current
+    }
+
+    func markWhatsNewSeen() {
+        let current = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        UserDefaults.standard.set(current, forKey: "last_seen_version")
+    }
+
+    /// A month since the last backup (or since first use), and you have some data worth keeping.
+    func backupDue(_ today: Day) -> Bool {
+        let d = UserDefaults.standard
+        if d.integer(forKey: "first_seen_day") == 0 { d.set(today.epochDay, forKey: "first_seen_day") }
+        if items.count < 5 || today.epochDay < d.integer(forKey: "backup_snooze_until") { return false }
+        return today.epochDay - max(d.integer(forKey: "last_backup_day"), d.integer(forKey: "first_seen_day")) >= 30
+    }
+
+    func snoozeBackup(_ today: Day) {
+        UserDefaults.standard.set(today.epochDay + 14, forKey: "backup_snooze_until")
+        objectWillChange.send()
     }
 
     // MARK: Saving
@@ -595,6 +669,7 @@ final class Store: ObservableObject {
                 copy.refillNeeded = false
                 copy.hiddenFromList = false
                 copy.buyPriority = 1
+                copy.skipUntil = 0
             }
             return copy
         }
@@ -784,6 +859,7 @@ final class Store: ObservableObject {
         f.dateFormat = "yyyy-MM-dd"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("kitchtally-backup-\(f.string(from: Date())).json")
         try Backup.encode(items, events, notes: notes, recipes: recipes).write(to: url, options: .atomic)
+        UserDefaults.standard.set(Day.today().epochDay, forKey: "last_backup_day")
         return url
     }
 

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.1
+- iPhone gets everything from 1.9.0: Not this week and breaks, Skipping section, skip all that's left, the new-week review, Treats & fun, the What's new note and the backup reminder. (Also includes Recipes and the meal planner, as in 1.8.0.)
+
 ## 1.9.0
 - **Not this week:** on To buy, "More" lets you skip an item until the next week starts, or take a break for 2 weeks, 4 weeks, or until you add it back. Skipped items wait in their own "Skipping" section with an Add back button, and don't count in the badge, the estimate or Done shopping. Pantry shows a quiet "skipping" tag instead of a low-stock warning. "Skip all that's left" does the whole list in one tap.
 - **New week review:** when a new week starts, To buy asks "Still want these?" so you can switch off what you don't feel like buying.

@@ -179,8 +179,11 @@ struct Entry {
 enum Categories {
     static let presets = [
         "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
-        "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
+        "Bread & bakery", "Spices", "Snacks", "Drinks", "Treats & fun", "Personal care", "Household", "Other",
     ]
+
+    /// Chocolates, soda and the like: only on To buy from Thursday, ready for the weekend.
+    static func isWeekendTreat(_ category: String) -> Bool { category.lowercased() == "treats & fun" }
 
     /// Things that last a month or more and aren't food: counted in Budget, not in the weekly shop.
     static func isLongLasting(_ category: String) -> Bool {
@@ -193,7 +196,7 @@ enum Categories {
     private static let emoji: [String: String] = [
         "vegetables": "🥬", "fruit": "🍎", "staples": "🌾", "sauces & spreads": "🥫",
         "dairy & eggs": "🥛", "meat & protein": "🍗", "bread & bakery": "🍞", "spices": "🌶️",
-        "snacks": "🍪", "drinks": "🥤", "personal care": "🧴", "household": "🧻", "other": "📦",
+        "snacks": "🍪", "drinks": "🥤", "treats & fun": "🍫", "personal care": "🧴", "household": "🧻", "other": "📦",
         "groceries": "🛒",
     ]
 
@@ -226,6 +229,7 @@ enum Suggestions {
     // Checked in order, so more specific names come first.
     private static let rules: [([String], Suggestion)] = [
         (["ice cream"], Suggestion(category: "Snacks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
+        (["chocolate", "candy", "candies", "sweets", "gummy", "gummies", "soda", "cola", "pepsi", "fanta", "sprite", "energy drink", "lollipop", "wafer", "brownie", "donut", "doughnut"], Suggestion(category: "Treats & fun", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach"], Suggestion(category: "Household", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
@@ -251,7 +255,7 @@ enum Suggestions {
         (["pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "vermicelli"], Suggestion(category: "Staples", unit: .PACKET, life: .LONG, packSize: 0, countMeals: true)),
         (["coffee", "tea", "chai"], Suggestion(category: "Drinks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi"], Suggestion(category: "Drinks", unit: .BOTTLE, life: .MEDIUM, packSize: 0, countMeals: false)),
-        (["chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake"], Suggestion(category: "Snacks", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
+        (["chips", "crisps", "biscuit", "cookie", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "cake"], Suggestion(category: "Snacks", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
     ]
 
     /// True if [keyword] starts a word in [text]: "egg" matches "Eggs" but "peas" doesn't match "chickpeas".
