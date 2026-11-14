@@ -153,7 +153,7 @@ struct ShoppingView: View {
                                 }
                                 Spacer(minLength: 4)
                                 Button("Add back") {
-                                    if weekend { store.setRefillNeeded(item.id, true) } else { store.skipItems([item], until: 0) }
+                                    if weekend { store.setRefillNeeded(item.id, true) } else { _ = store.skipItems([item], until: 0) }
                                 }
                                 .buttonStyle(.borderless)
                             }
