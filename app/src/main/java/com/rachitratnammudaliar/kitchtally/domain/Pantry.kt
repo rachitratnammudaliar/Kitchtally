@@ -153,8 +153,11 @@ data class Entry(
 object Categories {
     val presets = listOf(
         "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
-        "Bread & bakery", "Spices", "Snacks", "Drinks", "Personal care", "Household", "Other",
+        "Bread & bakery", "Spices", "Snacks", "Drinks", "Treats & fun", "Personal care", "Household", "Other",
     )
+
+    /** Chocolates, soda and the like: only on To buy from Thursday, ready for the weekend. */
+    fun isWeekendTreat(category: String): Boolean = category.equals("Treats & fun", ignoreCase = true)
 
     /** Things that last a month or more and aren't food: counted in Budget, not in the weekly shop. */
     fun isLongLasting(category: String): Boolean = category.equals("Personal care", ignoreCase = true) || category.equals("Household", ignoreCase = true)
@@ -170,7 +173,7 @@ object Categories {
     private val emoji = mapOf(
         "vegetables" to "🥬", "fruit" to "🍎", "staples" to "🌾", "sauces & spreads" to "🥫",
         "dairy & eggs" to "🥛", "meat & protein" to "🍗", "bread & bakery" to "🍞", "spices" to "🌶️",
-        "snacks" to "🍪", "drinks" to "🥤", "personal care" to "🧴", "household" to "🧻", "other" to "📦",
+        "snacks" to "🍪", "drinks" to "🥤", "treats & fun" to "🍫", "personal care" to "🧴", "household" to "🧻", "other" to "📦",
         "groceries" to "🛒",
     )
 
@@ -188,6 +191,7 @@ object Suggestions {
     // "eggplant" a vegetable, "hair oil" personal care, "peanut butter" a spread.
     private val rules: List<Pair<List<String>, Suggestion>> = listOf(
         listOf("ice cream") to s("Snacks", QtyUnit.LEVEL, Life.LONG),
+        listOf("chocolate", "candy", "candies", "sweets", "gummy", "gummies", "soda", "cola", "pepsi", "fanta", "sprite", "energy drink", "lollipop", "wafer", "brownie", "donut", "doughnut") to s("Treats & fun", QtyUnit.PACKET, Life.LONG),
         listOf("toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin") to s("Household", QtyUnit.PACKET, Life.LONG),
         listOf("sponge", "scrub", "bin bag", "trash bag", "garbage bag", "foil", "cling", "baking paper") to s("Household", QtyUnit.PACKET, Life.LONG),
         listOf("dishwash", "dish wash", "dish soap", "washing liquid", "washing up", "detergent", "laundry", "cleaner", "bleach") to s("Household", QtyUnit.LEVEL, Life.LONG),
@@ -213,7 +217,7 @@ object Suggestions {
         listOf("pasta", "spaghetti", "spagheti", "macaroni", "penne", "noodle", "maggi", "chole", "chana", "chickpea", "rajma", "dal", "daal", "lentil", "vermicelli") to s("Staples", QtyUnit.PACKET, Life.LONG, meals = true),
         listOf("coffee", "tea", "chai") to s("Drinks", QtyUnit.LEVEL, Life.LONG),
         listOf("juice", "water", "soda", "cola", "coke", "sprite", "beer", "wine", "energy drink", "lassi") to s("Drinks", QtyUnit.BOTTLE, Life.MEDIUM),
-        listOf("chips", "crisps", "biscuit", "cookie", "chocolate", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "candy", "sweets", "cake") to s("Snacks", QtyUnit.PACKET, Life.LONG),
+        listOf("chips", "crisps", "biscuit", "cookie", "namkeen", "bhujia", "popcorn", "nuts", "almond", "cashew", "peanut", "cake") to s("Snacks", QtyUnit.PACKET, Life.LONG),
     )
 
     /** True if [keyword] starts a word in [text]: "egg" matches "Eggs" but "peas" doesn't match "chickpeas". */

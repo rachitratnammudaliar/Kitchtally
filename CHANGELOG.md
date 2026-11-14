@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0
+- **Not this week:** on To buy, "More" lets you skip an item until the next week starts, or take a break for 2 weeks, 4 weeks, or until you add it back. Skipped items wait in their own "Skipping" section with an Add back button, and don't count in the badge, the estimate or Done shopping. Pantry shows a quiet "skipping" tag instead of a low-stock warning. "Skip all that's left" does the whole list in one tap.
+- **New week review:** when a new week starts, To buy asks "Still want these?" so you can switch off what you don't feel like buying.
+- **Treats & fun:** a new category (chocolate, soda, sweets). Items in it only come up on To buy from Thursday, ready for the weekend, unless you mark them as needing a refill.
+- A **What's new** note appears once after each update, and a **backup reminder** appears after a month without one.
+- Android first: iPhone follows in 1.9.1.
+- Database moves to version 8; your data and backups carry over.
+
 ## 1.8.0
 - New **Recipes** tab between Pantry and To buy. Add a dish, pick its ingredients from your pantry, mark each Needed or Optional, and set the usual amount. One cook makes 4 meals for you, or 2 if you share (you can change both numbers).
 - Recipes are coloured by what you have: green can cook now, amber is only missing something optional, red is missing a needed item. "What can I cook?" filters to what's possible. Each recipe shows about how much a meal costs, from your last prices.

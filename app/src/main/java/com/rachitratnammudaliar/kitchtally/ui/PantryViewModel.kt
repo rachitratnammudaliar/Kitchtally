@@ -119,6 +119,54 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _forNextWeekUntil.value = until
     }
 
+    /** True once after an update, so the app can say what changed. A fresh install shows nothing. */
+    fun shouldShowWhatsNew(): Boolean {
+        val current = com.rachitratnammudaliar.kitchtally.BuildConfig.VERSION_NAME
+        val seen = prefs.lastSeenVersion
+        if (seen.isEmpty()) { prefs.lastSeenVersion = current; return false }
+        return seen != current
+    }
+
+    fun markWhatsNewSeen() {
+        prefs.lastSeenVersion = com.rachitratnammudaliar.kitchtally.BuildConfig.VERSION_NAME
+    }
+
+    private val _backupTick = MutableStateFlow(0)
+    val backupTick: StateFlow<Int> = _backupTick.asStateFlow()
+
+    /** A month since the last backup (or since first use), and you have some data worth keeping. */
+    fun backupDue(today: LocalDate, itemCount: Int): Boolean {
+        val now = today.toEpochDay()
+        if (prefs.firstSeenDay == 0L) prefs.firstSeenDay = now
+        if (itemCount < 5 || now < prefs.backupSnoozeUntil) return false
+        return now - maxOf(prefs.lastBackupDay, prefs.firstSeenDay) >= 30
+    }
+
+    fun snoozeBackup(today: LocalDate) {
+        prefs.backupSnoozeUntil = today.toEpochDay() + 14
+        _backupTick.value++
+    }
+
+    private val _weekReviewDay = MutableStateFlow(prefs.weekReviewDay)
+    val weekReviewDay: StateFlow<Long> = _weekReviewDay.asStateFlow()
+
+    fun markWeekReviewed(weekStart: Long) {
+        prefs.weekReviewDay = weekStart
+        _weekReviewDay.value = weekStart
+    }
+
+    /**
+     * Skip these on To buy until [until] (an epoch day; 0 brings them back). [onDone] gets an Undo
+     * that puts every item's skip back the way it was.
+     */
+    fun skipItems(items: List<Item>, until: Long, onDone: (undo: () -> Unit) -> Unit = {}) {
+        viewModelScope.launch {
+            val before = items.associate { it.id to it.skipUntil }
+            items.forEach { dao.setSkipUntil(it.id, until) }
+            onDone { viewModelScope.launch { before.forEach { (id, old) -> dao.setSkipUntil(id, old) } } }
+        }
+    }
+
     private val _weekAnchorDay = MutableStateFlow(prefs.weekAnchorDay)
     /** The day "Start new week" was pressed (epoch day), or 0. */
     val weekAnchorDay: StateFlow<Long> = _weekAnchorDay.asStateFlow()
@@ -474,6 +522,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         val text = Backup.encode(items, dao.events(), dao.notes(), dao.recipes())
         getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
             ?: throw IllegalStateException("Couldn't write the file")
+        prefs.lastBackupDay = LocalDate.now().toEpochDay()
+        _backupTick.value++
         items.size
     }
 

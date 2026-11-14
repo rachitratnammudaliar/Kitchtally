@@ -65,7 +65,10 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -178,7 +181,25 @@ fun shopOrder(shops: Collection<String>): List<String> =
 
 /** On the list when marked, out or running low, unless hidden until it's bought again. */
 fun onShoppingList(item: Item, state: PantryState, today: LocalDate): Boolean =
+    needsBuying(item, state, today) && !restingFromList(item, today)
+
+/** Would be on the list, ignoring any skip or weekend rest. */
+private fun needsBuying(item: Item, state: PantryState, today: LocalDate): Boolean =
     !item.unsure && !item.noRebuy && (item.refillNeeded || (!item.hiddenFromList && Pantry.status(state.entries(item.id), item.counting(), today) != StockStatus.OK))
+
+/** Skipping it for now, or a weekend treat before Thursday: it waits in its own section on To buy. */
+fun Item.skipping(today: LocalDate): Boolean = skipUntil > today.toEpochDay()
+
+private fun restingFromList(item: Item, today: LocalDate): Boolean =
+    item.skipping(today) || weekendTreatRest(item, today)
+
+/** Chocolates, soda and the like only come up from Thursday, unless you marked them as needing a refill. */
+fun weekendTreatRest(item: Item, today: LocalDate): Boolean =
+    Categories.isWeekendTreat(item.category) && !item.refillNeeded && today.dayOfWeek in listOf(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY)
+
+/** Out or low, but you're skipping it (or it's a weekend treat before Thursday). */
+fun skippedFromList(item: Item, state: PantryState, today: LocalDate): Boolean =
+    needsBuying(item, state, today) && restingFromList(item, today)
 
 const val UNSURE_GROUP = "🤔  Not sure to buy again"
 const val NOREBUY_GROUP = "🚫  No need to buy again"
@@ -399,7 +420,7 @@ private fun MainTabs(
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
             "recipes" -> RecipesScreen(vm, s, today, currency, snackbar, onEditRecipe, modifier)
-            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, modifier, openAdjust)
+            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, onSettings, modifier, openAdjust)
         }
     }
 }
@@ -416,6 +437,7 @@ private fun PantryList(
     onAdd: () -> Unit,
     onTab: (String) -> Unit,
     onCook: () -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier,
     openAdjust: Long = 0L,
 ) {
@@ -423,6 +445,24 @@ private fun PantryList(
     var filter by rememberSaveable { mutableStateOf("") }
     var search by rememberSaveable { mutableStateOf("") }
     var adjusting by rememberSaveable { mutableLongStateOf(openAdjust) }
+    var showNew by remember { mutableStateOf(vm.shouldShowWhatsNew()) }
+    if (showNew) {
+        AlertDialog(
+            onDismissRequest = { showNew = false; vm.markWhatsNewSeen() },
+            title = { Text("What's new") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("🍲  Recipes tab: cook a dish and the stock goes down for you. Plan meals and what's missing lands on To buy.")
+                    Text("😌  Not this week: skip things on To buy without them nagging you. Longer breaks too.")
+                    Text("🍫  Treats & fun: chocolates and soda wait until Thursday, ready for the weekend.")
+                    Text("🗓️  A new week asks \"Still want these?\" so your list matches what you feel like.")
+                }
+            },
+            confirmButton = { TextButton(onClick = { showNew = false; vm.markWhatsNewSeen() }) { Text("Got it") } },
+        )
+    }
+    val backupTick by vm.backupTick.collectAsStateWithLifecycle()
+    val backupDue = remember(backupTick, today, state.items.size) { vm.backupDue(today, state.items.size) }
     state.item(adjusting)?.let { target ->
         AdjustDialog(target, state.stock(target.id), onDismiss = { adjusting = 0L }) { action, amount ->
             adjusting = 0L
@@ -469,6 +509,20 @@ private fun PantryList(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (backupDue) {
+            item(key = "backup") {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("💾  Back up your pantry", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Text("It's been a month. Your data lives only on this phone. Settings → Backup saves a copy you can keep.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { vm.snoozeBackup(today) }) { Text("Later") }
+                            TextButton(onClick = { onSettings() }) { Text("Open Settings") }
+                        }
+                    }
+                }
+            }
+        }
         item(key = "summary") {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -570,7 +624,9 @@ private fun PantryList(
 private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: () -> Unit, onUse: () -> Unit, onShare: () -> Unit, onBuy: () -> Unit, onAdjust: () -> Unit) {
     val entries = state.entries(item.id)
     val stock = Pantry.stock(entries)
-    val status = Pantry.status(entries, item.counting(), today)
+    val skip = item.skipping(today) || weekendTreatRest(item, today)
+    // Skipping it for now: no red or amber warning, just a quiet tag.
+    val status = if (skip) StockStatus.OK else Pantry.status(entries, item.counting(), today)
     val alert = stock > 0 && status != StockStatus.OK
     Card(
         onClick = onClick,
@@ -584,7 +640,7 @@ private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: (
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StockPill(stockLabel(item, stock) + (if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
+                StockPill(stockLabel(item, stock) + (if (skip && Pantry.status(entries, item.counting(), today) != StockStatus.OK) " · skipping" else if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
                 Text(
                     detailLine(item, state, today),
                     style = MaterialTheme.typography.bodySmall,
@@ -626,6 +682,14 @@ private fun ShoppingList(
 ) {
     val scope = rememberCoroutineScope()
     var newText by rememberSaveable { mutableStateOf("") }
+    val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
+    val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
+    val reviewedWeek by vm.weekReviewDay.collectAsStateWithLifecycle()
+    val thisWeekStart = Pantry.weekStart(today, DayOfWeek.of(weekFirst), weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) })
+    // Skipping something "this week" lasts until the next week starts.
+    val nextWeekDay = thisWeekStart.plusWeeks(1).toEpochDay()
+    var reviewing by rememberSaveable { mutableStateOf(false) }
+    var confirmSkipAll by rememberSaveable { mutableStateOf(false) }
     val planned = plannedNeeds(state)
     val plannedIds = planned.map { it.item.id }.toSet()
     val list = state.items.filter { onShoppingList(it, state, today) && it.id !in plannedIds }
@@ -641,6 +705,10 @@ private fun ShoppingList(
     }
     val estimate = (list + planned.map { it.item }).sumOf { Pantry.expectedPriceMinor(it.unitValue(), state.entries(it.id), it.packSize) ?: 0L }
     val hidden = state.items.filter { it.hiddenFromList && status(it) != StockStatus.OK }
+    val skipped = state.items.filter { skippedFromList(it, state, today) && it.id !in plannedIds }.sortedBy { it.name.lowercase() }
+    val leftToSkip = list.filter { it.id !in ticked }
+    val needsReview = list.isNotEmpty() && reviewedWeek != thisWeekStart.toEpochDay()
+    fun skipUndo(message: String, undo: () -> Unit) = scope.undoSnackbar(snackbar, message, undo)
 
     fun add() {
         val text = newText.trim()
@@ -651,6 +719,54 @@ private fun ShoppingList(
         newText = ""
     }
 
+    if (confirmSkipAll) {
+        AlertDialog(
+            onDismissRequest = { confirmSkipAll = false },
+            title = { Text("Skip all that's left?") },
+            text = { Text("${leftToSkip.size} items you haven't ticked wait in the Skipping section until next week. Add any back whenever you like.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmSkipAll = false
+                    vm.markWeekReviewed(thisWeekStart.toEpochDay())
+                    vm.skipItems(leftToSkip, nextWeekDay) { undo -> skipUndo("Skipping ${leftToSkip.size} items this week", undo) }
+                }) { Text("Skip them") }
+            },
+            dismissButton = { TextButton(onClick = { confirmSkipAll = false }) { Text("Cancel") } },
+        )
+    }
+    if (reviewing) {
+        val toSkip = remember { mutableStateListOf<Long>() }
+        AlertDialog(
+            onDismissRequest = { reviewing = false },
+            title = { Text("Still want these?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Hint("Switch on the ones you don't feel like buying this week.")
+                    LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                        list.sortedBy { it.name.lowercase() }.forEach { row ->
+                            item(key = row.id) {
+                                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(row.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("Skip", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(8.dp))
+                                    Switch(checked = row.id in toSkip, onCheckedChange = { on -> if (on) toSkip.add(row.id) else toSkip.remove(row.id) })
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reviewing = false
+                    vm.markWeekReviewed(thisWeekStart.toEpochDay())
+                    val chosen = list.filter { it.id in toSkip }
+                    if (chosen.isNotEmpty()) vm.skipItems(chosen, nextWeekDay) { undo -> skipUndo("Skipping ${chosen.size} items this week", undo) }
+                }) { Text("Done") }
+            },
+            dismissButton = { TextButton(onClick = { reviewing = false }) { Text("Cancel") } },
+        )
+    }
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
@@ -686,6 +802,18 @@ private fun ShoppingList(
         } else {
             item(key = "summary") {
                 val count = list.size + planned.size + state.notes.size
+                if (needsReview) {
+                    Card(Modifier.fillMaxWidth().padding(bottom = 8.dp), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("🗓️  New week: still want these ${list.size}?", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text("Skip what you don't feel like buying this week. They wait in their own section.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                TextButton(onClick = { vm.markWeekReviewed(thisWeekStart.toEpochDay()) }) { Text("Keep all") }
+                                TextButton(onClick = { reviewing = true }) { Text("Review") }
+                            }
+                        }
+                    }
+                }
                 Text(
                     "$count to buy" + (if (estimate > 0) " · about ${Money.format(estimate, currency)} at last prices" else "") +
                         if (list.isNotEmpty() || planned.isNotEmpty()) ". Tick what you bought, then tap Done shopping." else "",
@@ -693,6 +821,9 @@ private fun ShoppingList(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 4.dp),
                 )
+                if (leftToSkip.size > 1) {
+                    TextButton(onClick = { confirmSkipAll = true }) { Text("Not this week: skip all that's left (${leftToSkip.size})") }
+                }
             }
         }
         if (state.notes.isNotEmpty()) {
@@ -717,7 +848,7 @@ private fun ShoppingList(
                 item(key = "planned-${need.item.id}") {
                     val reason = "for " + need.recipes.joinToString(", ") { r -> r.name + if (r.plannedDay > 0) " · " + Recipes.planLabel(r.plannedDay, today) else "" } +
                         if (need.needed) "" else " (optional)"
-                    BuyCard(vm, state, need.item, currency, ticked, onTick, onOpen, onBuy, snackbar, reason)
+                    BuyCard(vm, state, need.item, currency, ticked, onTick, onOpen, onBuy, snackbar, reason, "", nextWeekDay)
                 }
             }
         }
@@ -726,13 +857,40 @@ private fun ShoppingList(
                 val items = byPriority[priority].orEmpty().sortedWith(sortInside)
                 if (items.isNotEmpty()) {
                     item(key = "prio-$priority") { SectionTitle("$title · ${items.size}") }
-                    items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null, shopOf(row)) } }
+                    items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null, shopOf(row), nextWeekDay) } }
                 }
             }
         } else {
             sections.forEach { (shop, items) ->
                 item(key = "shop-$shop") { SectionTitle(if (shop.isEmpty()) "🛒  Anywhere · ${items.size}" else "🏪  $shop · ${items.size}") }
-                items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null) } }
+                items.forEach { row -> item(key = "buy-${row.id}") { BuyCard(vm, state, row, currency, ticked, onTick, onOpen, onBuy, snackbar, null, "", nextWeekDay) } }
+            }
+        }
+        if (skipped.isNotEmpty()) {
+            item(key = "skipped-title") { SectionTitle("😌  Skipping · ${skipped.size}") }
+            skipped.forEach { row ->
+                item(key = "skipped-${row.id}") {
+                    val weekend = !row.skipping(today) && weekendTreatRest(row, today)
+                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                        Row(Modifier.padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ItemImage(row.name, row.photoFile, size = 40.dp, category = row.category)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(row.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    when {
+                                        weekend -> "Weekend treat · comes up on Thursday"
+                                        row.skipUntil >= 9_000_000L -> "On a break until you add it back"
+                                        else -> "Skipping · back " + LocalDate.ofEpochDay(row.skipUntil).let { it.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault()) + " " + it.dayOfMonth }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            TextButton(onClick = { if (weekend) vm.setRefillNeeded(row, true) else vm.skipItems(listOf(row), 0L) }) { Text("Add back") }
+                        }
+                    }
+                }
             }
         }
         if (hidden.isNotEmpty()) {
@@ -762,6 +920,7 @@ private fun BuyCard(
     snackbar: SnackbarHostState,
     reason: String?,
     shop: String = "",
+    nextWeekDay: Long = 0L,
 ) {
     val scope = rememberCoroutineScope()
     fun status(item: Item) = Pantry.status(state.entries(item.id), item.counting(), LocalDate.now())
@@ -796,6 +955,14 @@ private fun BuyCard(
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             listOf(0 to "Move to ASAP", 1 to "Move to Priority", 2 to "Move to Anytime").filter { it.first != row.buyPriority }.forEach { (priority, label) ->
                                 DropdownMenuItem(text = { Text(label) }, onClick = { menu = false; vm.setBuyPriority(row, priority) })
+                            }
+                            if (nextWeekDay > 0) {
+                                listOf(nextWeekDay to "Not this week", LocalDate.now().plusWeeks(2).toEpochDay() to "Take a break · 2 weeks", LocalDate.now().plusWeeks(4).toEpochDay() to "Take a break · 4 weeks", 9_999_999L to "Take a break · until I add it back").forEach { (until, label) ->
+                                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                                        menu = false
+                                        vm.skipItems(listOf(row), until) { undo -> scope.undoSnackbar(snackbar, "${row.name}: ${label.lowercase()}", undo) }
+                                    })
+                                }
                             }
                             DropdownMenuItem(
                                 text = { Text("Hide until I buy it") },

@@ -144,6 +144,29 @@ class Prefs(context: Context) {
         get() = prefs.getLong("week_anchor_day", 0L)
         set(value) = prefs.edit().putLong("week_anchor_day", value).apply()
 
+    /** The app version whose "What's new" you last saw; empty on a fresh install. */
+    var lastSeenVersion: String
+        get() = prefs.getString("last_seen_version", "") ?: ""
+        set(value) = prefs.edit().putString("last_seen_version", value).apply()
+
+    /** The first day the app was opened (epoch day), for the backup reminder. 0 = not yet. */
+    var firstSeenDay: Long
+        get() = prefs.getLong("first_seen_day", 0L)
+        set(value) = prefs.edit().putLong("first_seen_day", value).apply()
+
+    var lastBackupDay: Long
+        get() = prefs.getLong("last_backup_day", 0L)
+        set(value) = prefs.edit().putLong("last_backup_day", value).apply()
+
+    var backupSnoozeUntil: Long
+        get() = prefs.getLong("backup_snooze_until", 0L)
+        set(value) = prefs.edit().putLong("backup_snooze_until", value).apply()
+
+    /** The week (its first day, as an epoch day) whose To buy list you last went through with "Still want these?". */
+    var weekReviewDay: Long
+        get() = prefs.getLong("week_review_day", 0L)
+        set(value) = prefs.edit().putLong("week_review_day", value).apply()
+
     /** "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off. */
     var forNextWeekUntil: Long
         get() = prefs.getLong("for_next_week_until", 0L)

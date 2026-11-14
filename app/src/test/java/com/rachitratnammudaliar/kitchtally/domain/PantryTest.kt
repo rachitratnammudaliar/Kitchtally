@@ -375,4 +375,11 @@ class PantryTest {
         assertEquals(400L, Recipes.cost(lines) { if (it == 1L) 200.0 else null })
         assertEquals(null, Recipes.cost(lines) { null })
     }
+
+    @Test
+    fun treatsAreAWeekendCategory() {
+        assertTrue(Categories.isWeekendTreat("Treats & fun"))
+        assertFalse(Categories.isWeekendTreat("Snacks"))
+        assertEquals("Treats & fun", Suggestions.forName("Dairy Milk chocolate")?.category)
+    }
 }

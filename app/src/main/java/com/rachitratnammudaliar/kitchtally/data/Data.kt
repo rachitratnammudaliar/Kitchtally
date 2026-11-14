@@ -65,6 +65,9 @@ data class Item(
     // Added in database version 7 (app 1.8.0).
     /** Where it sits on To buy: 0 ASAP, 1 Priority (usual), 2 Anytime. Back to 1 once bought. */
     val buyPriority: Int = 1,
+    // Added in database version 8 (app 1.9.0).
+    /** Skipping it on To buy until this epoch day (not this week, or a break). 0 = not skipping. */
+    val skipUntil: Long = 0,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -173,6 +176,12 @@ interface PantryDao {
     @Query("UPDATE recipes SET plannedDay = :day WHERE id = :id")
     suspend fun setPlanned(id: Long, day: Long)
 
+    @Query("UPDATE items SET skipUntil = :until WHERE id = :id")
+    suspend fun setSkipUntil(id: Long, until: Long)
+
+    @Query("SELECT skipUntil FROM items WHERE id = :id")
+    suspend fun skipUntilOf(id: Long): Long?
+
     @Query("UPDATE items SET buyPriority = :priority WHERE id = :id")
     suspend fun setBuyPriority(id: Long, priority: Int)
 
@@ -214,7 +223,7 @@ interface PantryDao {
     suspend fun setCountsFrom(ids: List<Long>, day: Long?)
 
     /** After buying: off the manual list, and shown again if it was hidden. */
-    @Query("UPDATE items SET refillNeeded = 0, hiddenFromList = 0, buyPriority = 1 WHERE id = :id")
+    @Query("UPDATE items SET refillNeeded = 0, hiddenFromList = 0, buyPriority = 1, skipUntil = 0 WHERE id = :id")
     suspend fun clearRefill(id: Long)
 
     @Transaction
@@ -308,7 +317,14 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 7, exportSchema = false)
+/** Version 7 -> 8 (app 1.8 -> 1.9.0): skipping an item on To buy for a week, or a longer break. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE items ADD COLUMN skipUntil INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 8, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -321,7 +337,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build().also { instance = it }
             }
     }
