@@ -179,7 +179,7 @@ struct Entry {
 enum Categories {
     static let presets = [
         "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
-        "Bread & bakery", "Spices", "Snacks", "Drinks", "Treats & fun", "Personal care", "Household", "Other",
+        "Bread & bakery", "Spices", "Snacks", "Frozen", "Drinks", "Treats & fun", "Personal care", "Health", "Household", "Other",
     ]
 
     /// Chocolates, soda and the like: only on To buy from Thursday, ready for the weekend.
@@ -197,7 +197,7 @@ enum Categories {
         "vegetables": "🥬", "fruit": "🍎", "staples": "🌾", "sauces & spreads": "🥫",
         "dairy & eggs": "🥛", "meat & protein": "🍗", "bread & bakery": "🍞", "spices": "🌶️",
         "snacks": "🍪", "drinks": "🥤", "treats & fun": "🍫", "personal care": "🧴", "household": "🧻", "other": "📦",
-        "groceries": "🛒",
+        "groceries": "🛒", "frozen": "❄️", "health": "💊",
     ]
 
     static func emojiFor(_ category: String) -> String {
@@ -228,6 +228,8 @@ struct Suggestion: Equatable {
 enum Suggestions {
     // Checked in order, so more specific names come first.
     private static let rules: [([String], Suggestion)] = [
+        (["vitamin", "supplement", "omega", "magnesium", "zinc", "multivit", "probiotic", "paracetamol", "ibuprofen", "plaster"], Suggestion(category: "Health", unit: .PIECE, life: .LONG, packSize: 0, countMeals: false)),
+        (["french fries", "fries", "frozen"], Suggestion(category: "Frozen", unit: .PACKET, life: .MEDIUM, packSize: 0, countMeals: false)),
         (["ice cream"], Suggestion(category: "Snacks", unit: .LEVEL, life: .LONG, packSize: 0, countMeals: false)),
         (["chocolate", "candy", "candies", "sweets", "gummy", "gummies", "soda", "cola", "pepsi", "fanta", "sprite", "energy drink", "lollipop", "wafer", "brownie", "donut", "doughnut"], Suggestion(category: "Treats & fun", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
         (["toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin"], Suggestion(category: "Household", unit: .PACKET, life: .LONG, packSize: 0, countMeals: false)),
@@ -275,8 +277,92 @@ enum Suggestions {
     }
 }
 
+/// Best shop for an item, from what you paid there.
+struct ShopPrice {
+    let shop: String
+    let unitPriceMinor: Int64
+    let purchases: Int
+}
+
+enum ShopCompare {
+    /// Average price per unit at each shop (priced purchases only), cheapest first.
+    static func byShop(_ entries: [Entry], _ unit: QtyUnit) -> [ShopPrice] {
+        var groups: [String: [Entry]] = [:]
+        var order: [String] = []
+        for e in entries where e.type == .BOUGHT && e.priceMinor != nil && e.quantity > 0 {
+            let name = e.shop.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { continue }
+            let key = name.lowercased()
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(e)
+        }
+        let result: [ShopPrice] = order.compactMap { key in
+            let list = groups[key] ?? []
+            let prices = list.compactMap { Pantry.unitPriceMinor($0, unit) }
+            if prices.isEmpty { return nil }
+            return ShopPrice(shop: list[0].shop.trimmingCharacters(in: .whitespaces), unitPriceMinor: prices.reduce(0, +) / Int64(prices.count), purchases: prices.count)
+        }
+        return result.sorted { $0.unitPriceMinor < $1.unitPriceMinor }
+    }
+}
+
+/// Items that last weeks or months: when they were bought, how long they last, when they run low.
+enum LongLasting {
+    private static func boughtDays(_ entries: [Entry]) -> [(day: Int, qty: Double)] {
+        var byDay: [Int: Double] = [:]
+        for e in entries where e.type == .BOUGHT && e.quantity > 0 { byDay[e.date.epochDay, default: 0] += e.quantity }
+        return byDay.map { (day: $0.key, qty: $0.value) }.sorted { $0.day < $1.day }
+    }
+
+    /// Days one unit lasts, from your own purchases (gap to the next purchase divided by how much you bought). Nil with fewer than two purchases.
+    static func learnedDaysPerUnit(_ entries: [Entry]) -> Double? {
+        let b = boughtDays(entries)
+        if b.count < 2 { return nil }
+        var per: [Double] = []
+        for i in 0..<(b.count - 1) {
+            let v = Double(b[i + 1].day - b[i].day) / b[i].qty
+            if v > 0 { per.append(v) }
+        }
+        per.sort()
+        return per.isEmpty ? nil : per[per.count / 2]
+    }
+
+    /// About how many days the last purchase lasts: learned from your history, else the number you set.
+    static func expectedDays(_ entries: [Entry], lastsDays: Int) -> Int? {
+        let b = boughtDays(entries)
+        if let per = learnedDaysPerUnit(entries), let last = b.last { return max(1, Int((per * last.qty).rounded())) }
+        return lastsDays > 0 ? lastsDays : nil
+    }
+
+    /// The day it probably runs out, or nil if never bought or the duration is unknown.
+    static func runsOutOn(_ entries: [Entry], lastsDays: Int) -> Day? {
+        guard let last = boughtDays(entries).last, let days = expectedDays(entries, lastsDays: lastsDays) else { return nil }
+        return Day(epochDay: last.day + days)
+    }
+
+    /// Running low within `withinDays` days (or already past).
+    static func runningLow(_ entries: [Entry], lastsDays: Int, today: Day, withinDays: Int = 7) -> Bool {
+        guard let out = runsOutOn(entries, lastsDays: lastsDays) else { return false }
+        return out.epochDay - today.epochDay <= withinDays
+    }
+
+    /// Bought three or more times, a month or more apart: probably long-lasting.
+    static func looksLongLasting(_ entries: [Entry]) -> Bool {
+        let b = boughtDays(entries)
+        if b.count < 3 { return false }
+        let gaps = (0..<(b.count - 1)).map { b[$0 + 1].day - b[$0].day }.sorted()
+        return gaps[gaps.count / 2] >= 35
+    }
+
+    /// Cost spread over the months it lasts, in cents per month, from the last priced purchase.
+    static func monthlyMinor(_ entries: [Entry], lastsDays: Int) -> Int64? {
+        guard let priced = Pantry.lastPriced(entries), let price = priced.priceMinor, let days = expectedDays(entries, lastsDays: lastsDays) else { return nil }
+        return Int64((Double(price) * 30.0 / Double(days)).rounded())
+    }
+}
+
 enum Shops {
-    static let presets = ["IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco"]
+    static let presets = ["IKI", "Maxima", "Lidl", "Rimi", "Norfa", "Depo", "Silas", "Pepco"]
 
     static func options(_ used: [String]) -> [String] {
         var seen = Set<String>()

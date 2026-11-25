@@ -19,6 +19,10 @@ struct EditItemView: View {
     @State private var stockText: String
     @State private var refill: Bool
     @State private var unsure: Bool
+    @State private var longLasting: Bool
+    @State private var lastsText: String
+    @State private var hasExpiry: Bool
+    @State private var expiryDate: Date
     @State private var countMeals: Bool
     @State private var mealsText: String
     @State private var lowInMeals: Bool
@@ -74,6 +78,10 @@ struct EditItemView: View {
         _stockText = State(initialValue: "")
         _refill = State(initialValue: existing?.refillNeeded ?? false)
         _unsure = State(initialValue: existing?.unsure ?? false)
+        _longLasting = State(initialValue: existing?.longLasting ?? false)
+        _lastsText = State(initialValue: (existing?.lastsDays ?? 0) > 0 ? String(existing!.lastsDays) : "")
+        _hasExpiry = State(initialValue: (existing?.expiryDay ?? 0) > 0)
+        _expiryDate = State(initialValue: (existing?.expiryDay ?? 0) > 0 ? Day(epochDay: existing!.expiryDay).localDate : Date().addingTimeInterval(86_400 * 180))
         _countMeals = State(initialValue: existing?.countMeals ?? false)
         let pack = (existing?.packSize ?? 0) > 0 ? existing!.packSize : 1
         _mealsText = State(initialValue: (existing?.mealsPerUnit ?? 0) > 0 ? Qty.format(Qty.round(existing!.mealsPerUnit * pack)) : "")
@@ -124,6 +132,9 @@ struct EditItemView: View {
         item.lowAt = lowValue ?? 1
         item.refillNeeded = refill && !unsure
         item.unsure = unsure
+        item.longLasting = longLasting
+        item.lastsDays = longLasting ? min(3650, max(0, Int(lastsText.trimmingCharacters(in: .whitespaces)) ?? 0)) : 0
+        item.expiryDay = hasExpiry ? Day(localDate: expiryDate).epochDay : 0
         item.notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         item.photoFile = photo
         item.step = stepValue ?? 1
@@ -261,6 +272,19 @@ struct EditItemView: View {
                     Text("Running low")
                 } footer: {
                     Text("It says \"almost out\" and goes on the shopping list at or below \"running low at\"." + (countMeals ? " It turns red at 1 meal." : "") + (unit.isLevel ? " For oil, each use might be 5 or 10%." : " For eggs, count in pieces with packs of 10: ＋ adds a pack, − takes one egg."))
+                }
+
+                Section {
+                    Toggle("Long-lasting", isOn: $longLasting)
+                    if longLasting {
+                        TextField("One purchase lasts about … days (optional)", text: $lastsText).keyboardType(.numberPad)
+                        Toggle("Best-before date", isOn: $hasExpiry)
+                        if hasExpiry { DatePicker("Best before", selection: $expiryDate, displayedComponents: .date) }
+                    }
+                } header: {
+                    Text("Long-lasting")
+                } footer: {
+                    Text("Toothpaste, vitamins, detergent: kept out of the weekly bill and tracked on their own. After two purchases the app uses your real figure instead.")
                 }
 
                 Section {
@@ -448,7 +472,7 @@ struct PurchaseView: View {
                 }
 
                 Section("Shop") {
-                    NamedChoice(options: Shops.options(store.usedShops), selected: $shop, otherLabel: "Shop name")
+                    NamedChoice(options: Shops.options(store.usedShops).filter { $0 == shop || !store.hiddenShops.contains($0) }, selected: $shop, otherLabel: "Shop name")
                 }
 
                 Section("Receipt photo (optional)") {

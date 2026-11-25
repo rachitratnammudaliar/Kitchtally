@@ -32,6 +32,12 @@ struct Item: Identifiable, Equatable {
     var buyPriority: Int = 1
     /// Skipping it on To buy until this epoch day (not this week, or a break). 0 = not skipping.
     var skipUntil: Int = 0
+    /// Lasts weeks or months (toothpaste, vitamins): kept out of the weekly bill, tracked on its own.
+    var longLasting: Bool = false
+    /// About how many days one purchase lasts; 0 = not set. The app learns the real figure from your purchases.
+    var lastsDays: Int = 0
+    /// Best-before date (epoch day); 0 = none.
+    var expiryDay: Int = 0
 
     var unitValue: QtyUnit { QtyUnit.from(unit) }
     var counting: Counting {
@@ -115,6 +121,7 @@ enum Backup {
                 "lowAt": i.lowAt, "refillNeeded": i.refillNeeded, "notes": i.notes, "createdAt": i.createdAt,
                 "step": i.step, "hiddenFromList": i.hiddenFromList, "packSize": i.packSize, "unsure": i.unsure,
                 "countMeals": i.countMeals, "mealsPerUnit": i.mealsPerUnit, "lowInMeals": i.lowInMeals, "noRebuy": i.noRebuy, "buyPriority": i.buyPriority, "skipUntil": i.skipUntil,
+                "longLasting": i.longLasting, "lastsDays": i.lastsDays, "expiryDay": i.expiryDay,
             ]
             if includePhotos { o["photoFile"] = i.photoFile }
             return o
@@ -180,7 +187,10 @@ enum Backup {
                 lowInMeals: (o["lowInMeals"] as? Bool) ?? false,
                 noRebuy: (o["noRebuy"] as? Bool) ?? false,
                 buyPriority: min(2, max(0, number(o, "buyPriority")?.intValue ?? 1)),
-                skipUntil: max(0, number(o, "skipUntil")?.intValue ?? 0)
+                skipUntil: max(0, number(o, "skipUntil")?.intValue ?? 0),
+                longLasting: (o["longLasting"] as? Bool) ?? false,
+                lastsDays: min(3650, max(0, number(o, "lastsDays")?.intValue ?? 0)),
+                expiryDay: max(0, number(o, "expiryDay")?.intValue ?? 0)
             ))
         }
         let refs = Set(items.map(\.id))
@@ -573,7 +583,47 @@ final class Store: ObservableObject {
     }
 
     /// Face cream, toilet paper, shower gel and the like are counted in Budget, not in the weekly shop.
-    func isLong(_ id: Int64) -> Bool { item(id).map { Categories.isLongLasting($0.category) } ?? false }
+    func isLong(_ id: Int64) -> Bool { item(id).map { $0.longLasting || Categories.isLongLasting($0.category) } ?? false }
+
+    /// Recipes, the meal planner and "Cook a meal". Off unless switched on in Settings.
+    @Published var cookingOn: Bool = UserDefaults.standard.bool(forKey: "cooking_on") {
+        didSet { UserDefaults.standard.set(cookingOn, forKey: "cooking_on") }
+    }
+
+    /// Shops hidden from the shop buttons.
+    @Published var hiddenShops: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "hidden_shops") ?? []) {
+        didSet { UserDefaults.standard.set(Array(hiddenShops), forKey: "hidden_shops") }
+    }
+
+    /// Marks an item as long-lasting (off the weekly bill, tracked on its own), with about how many days one purchase lasts.
+    func setLongLasting(_ id: Int64, _ on: Bool, lastsDays: Int? = nil) {
+        items = items.map { i in
+            var copy = i
+            if i.id == id {
+                copy.longLasting = on
+                if let d = lastsDays { copy.lastsDays = min(3650, max(0, d)) }
+            }
+            return copy
+        }
+        persist()
+    }
+
+    /// Files items sitting in "Other" under the category their name suggests. Returns how many moved.
+    @discardableResult
+    func tidyCategories() -> Int {
+        var moved = 0
+        items = items.map { i in
+            var copy = i
+            if i.category.lowercased() == "other", let s = Suggestions.forName(i.name), s.category.lowercased() != "other" {
+                copy.category = s.category
+                if s.category == "Health" { copy.longLasting = true }
+                moved += 1
+            }
+            return copy
+        }
+        if moved > 0 { persist() }
+        return moved
+    }
 
     func isForNextWeek(_ today: Day) -> Bool { forNextWeekUntil > today.epochDay }
 
@@ -794,6 +844,7 @@ final class Store: ObservableObject {
 
     /// What's missing for the meals you've planned. Needed things first, then optional ones.
     func plannedNeeds() -> [PlannedNeed] {
+        if !cookingOn { return [] }
         var order: [Int64] = []
         var wanted: [Int64: [(Recipe, Bool)]] = [:]
         for recipe in recipes where recipe.plannedDay != Recipes.notPlanned {

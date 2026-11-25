@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// The special groups on the home page, next to the categories.
+enum HomeGroup {
+    static let long = "🪥  Long-lasting"
+    static let unsure = "🤔  Not sure to buy again"
+    static let noRebuy = "🚫  No need to buy again"
+}
+
+private struct HomeTile: Identifiable {
+    let key: String
+    let emoji: String
+    let title: String
+    let count: Int
+    let need: Int
+    var id: String { key }
+}
+
 struct PantryView: View {
     @EnvironmentObject private var store: Store
     let today: Day
@@ -49,18 +65,24 @@ struct PantryView: View {
                     let shown = store.items.filter {
                         query.isEmpty || $0.name.lowercased().contains(query) || $0.notes.lowercased().contains(query)
                     }
-                    if categories.count > 1 {
-                        Section {
-                            Picker("Show", selection: $filter) {
-                                Text("All").tag("")
-                                ForEach(categories, id: \.self) { Text("\(Categories.emojiFor($0)) \($0)").tag($0) }
-                            }
-                        }
+                    let longItems = shown.filter { store.isLong($0.id) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+                    if filter.isEmpty && query.isEmpty {
+                        homeTiles(categories: categories, longItems: longItems)
+                    } else {
+                    if !filter.isEmpty {
+                        Section { Button("← All categories") { filter = "" } }
                     }
                     if shown.isEmpty {
                         Text("Nothing matches \"\(search)\"").foregroundColor(.secondary)
                     }
-                    ForEach(categories.filter { filter.isEmpty || $0 == filter }, id: \.self) { category in
+                    if filter == HomeGroup.long {
+                        Section(header: Text("\(HomeGroup.long) · \(longItems.count)")) {
+                            ForEach(longItems) { item in
+                                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
+                            }
+                        }
+                    }
+                    ForEach(categories.filter { filter.isEmpty || $0.lowercased() == filter.lowercased() }, id: \.self) { category in
                         let rows = shown.filter { !$0.unsure && !$0.noRebuy && $0.category.lowercased() == category.lowercased() }
                             .sorted { $0.name.lowercased() < $1.name.lowercased() }
                         if !rows.isEmpty {
@@ -71,7 +93,7 @@ struct PantryView: View {
                             }
                         }
                     }
-                    let noRebuy = shown.filter { $0.noRebuy && (filter.isEmpty || $0.category == filter) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+                    let noRebuy = shown.filter { $0.noRebuy && (filter.isEmpty || filter == HomeGroup.noRebuy) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
                     if !noRebuy.isEmpty {
                         Section(header: Text("🚫  No need to buy again · \(noRebuy.count)")) {
                             ForEach(noRebuy) { item in
@@ -79,13 +101,14 @@ struct PantryView: View {
                             }
                         }
                     }
-                    let unsure = shown.filter { $0.unsure && (filter.isEmpty || $0.category == filter) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
+                    let unsure = shown.filter { $0.unsure && (filter.isEmpty || filter == HomeGroup.unsure) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
                     if !unsure.isEmpty {
                         Section(header: Text("🤔  Not sure to buy again · \(unsure.count)")) {
                             ForEach(unsure) { item in
                                 ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -104,7 +127,7 @@ struct PantryView: View {
             .alert("What's new", isPresented: $showNew) {
                 Button("Got it") { store.markWhatsNewSeen() }
             } message: {
-                Text("🍲 Recipes tab: cook a dish and the stock goes down for you. Plan meals and what's missing lands on To buy.\n\n😌 Not this week: skip things on To buy without them nagging you. Longer breaks too.\n\n🍫 Treats & fun: chocolates and soda wait until Thursday, ready for the weekend.\n\n🗓️ A new week asks \"Still want these?\" so your list matches what you feel like.")
+                Text("🧩 A new home page: tap a category tile. A strip at the top shows what needs buying.\n\n🪥 Long-lasting things (toothpaste, vitamins) stay off your weekly bill. Mark any item, and see when it runs low.\n\n🏪 Each item shows its best shop. New shops: Depo and Silas.\n\n🍲 Recipes and Cook a meal are now optional: Settings → Features.")
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
@@ -112,6 +135,74 @@ struct PantryView: View {
                 CookSheet { message, action in showUndo($undo, message, action) }
             }
             .undoOverlay($undo)
+        }
+    }
+
+    @ViewBuilder
+    private func homeTiles(categories: [String], longItems: [Item]) -> some View {
+        let needs = store.items.filter { store.onShoppingList($0, today) }
+        let lowLong = store.items.filter {
+            store.isLong($0.id) && !$0.noRebuy && !store.onShoppingList($0, today) && LongLasting.runningLow(store.entries($0.id), lastsDays: $0.lastsDays, today: today)
+        }
+        let expiring = store.items.filter { $0.expiryDay > 0 && $0.expiryDay - today.epochDay <= 14 }
+        if !needs.isEmpty {
+            Section {
+                Button { tab = 1 } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("🛒  Needs buying · \(needs.count)").font(.headline)
+                        Text(needs.prefix(6).map(\.name).joined(separator: ", ") + (needs.count > 6 ? " and \(needs.count - 6) more" : ""))
+                            .font(.subheadline).foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        if !lowLong.isEmpty || !expiring.isEmpty {
+            Section(header: Text("🪥  Long-lasting, coming up")) {
+                ForEach(Array(lowLong.prefix(4))) { item in
+                    let left = (LongLasting.runsOutOn(store.entries(item.id), lastsDays: item.lastsDays)?.epochDay ?? today.epochDay) - today.epochDay
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                            Text(left <= 0 ? "Running low about now" : "Running low in about \(left) days").font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Add to shop") { store.setRefillNeeded(item.id, true) }.buttonStyle(.borderless)
+                    }
+                }
+                ForEach(Array(expiring.prefix(3))) { item in
+                    let d = item.expiryDay - today.epochDay
+                    Text("⏳  \(item.name): " + (d < 0 ? "past its best-before date" : "best before in \(d) days")).font(.caption).foregroundColor(.secondary)
+                }
+            }
+        }
+        let tiles: [HomeTile] = categories.map { c in
+            let inCat = store.items.filter { !$0.unsure && !$0.noRebuy && $0.category.lowercased() == c.lowercased() }
+            return HomeTile(key: c, emoji: Categories.emojiFor(c), title: c, count: inCat.count, need: inCat.filter { store.onShoppingList($0, today) }.count)
+        } + [
+            longItems.isEmpty ? nil : HomeTile(key: HomeGroup.long, emoji: "🪥", title: "Long-lasting", count: longItems.count, need: longItems.filter { store.onShoppingList($0, today) }.count),
+            store.items.filter { $0.unsure }.isEmpty ? nil : HomeTile(key: HomeGroup.unsure, emoji: "🤔", title: "Not sure to buy again", count: store.items.filter { $0.unsure }.count, need: 0),
+            store.items.filter { $0.noRebuy }.isEmpty ? nil : HomeTile(key: HomeGroup.noRebuy, emoji: "🚫", title: "No need to buy again", count: store.items.filter { $0.noRebuy }.count, need: 0),
+        ].compactMap { $0 }
+        Section {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(tiles) { tile in
+                    Button { filter = tile.key } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(tile.emoji).font(.largeTitle)
+                            Text(tile.title).font(.subheadline.weight(.semibold)).foregroundColor(.primary).lineLimit(2)
+                            Text("\(tile.count) item\(tile.count == 1 ? "" : "s")" + (tile.need > 0 ? " · \(tile.need) to buy" : ""))
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(tile.need > 0 ? Color(rgb: 0x2E6B3A).opacity(0.18) : Color.secondary.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+            .listRowBackground(Color.clear)
         }
     }
 
@@ -130,12 +221,14 @@ struct PantryView: View {
                     StatTile(value: "\(toBuy)", label: "to buy").onTapGesture { tab = 1 }
                 }
                 .padding(.top, 8)
-                Button { cooking = true } label: {
-                    Text("🍳  Cook a meal").frame(maxWidth: .infinity)
+                if store.cookingOn {
+                    Button { cooking = true } label: {
+                        Text("🍳  Cook a meal").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.top, 8)
+                    .disabled(store.items.isEmpty)
                 }
-                .buttonStyle(.borderedProminent)
-                .padding(.top, 8)
-                .disabled(store.items.isEmpty)
             }
             .padding(.vertical, 6)
             .listRowBackground(Color(rgb: 0x2E6B3A).opacity(0.12))

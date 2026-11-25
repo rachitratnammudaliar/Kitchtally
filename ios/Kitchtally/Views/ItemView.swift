@@ -96,6 +96,20 @@ struct ItemView: View {
                             .font(.caption).foregroundColor(.secondary)
                     }
                 }
+                Toggle(isOn: Binding(get: { store.isLong(id) }, set: { store.setLongLasting(id, $0) })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Long-lasting")
+                        Text(store.isLong(id) ? "Kept out of the weekly bill and tracked on its own" : "Toothpaste, vitamins, detergent: off the weekly bill")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                }
+                if !store.isLong(id) && LongLasting.looksLongLasting(entries) {
+                    HStack {
+                        Text("You buy this about once a month or less. Long-lasting?").font(.caption).foregroundColor(.secondary)
+                        Spacer()
+                        Button("Yes") { store.setLongLasting(id, true) }.buttonStyle(.borderless)
+                    }
+                }
                 if item.hiddenFromList {
                     HStack {
                         Text("Hidden from the shopping list until you buy it again.").font(.caption).foregroundColor(.secondary)
@@ -121,6 +135,24 @@ struct ItemView: View {
                 if let rate = Pantry.dailyUse(entries, today) {
                     let perWeek = Qty.approx(rate * 7)
                     InfoRow(label: "You use", value: "about " + (unit.isLevel ? unit.label(Qty.round(rate * 7)) : "\(perWeek) \(perWeek == "1" ? unit.singular : unit.plural)") + " a week")
+                }
+                let shopPrices = ShopCompare.byShop(entries, unit)
+                if shopPrices.count >= 2, let best = shopPrices.first {
+                    InfoRow(label: "Best shop", value: best.shop,
+                            note: shopPrices.map { "\($0.shop) \(Money.format($0.unitPriceMinor, store.currency))" }.joined(separator: " · ") + " " + unit.priceLabel)
+                }
+                if store.isLong(id) {
+                    if let out = LongLasting.runsOutOn(entries, lastsDays: item.lastsDays) {
+                        let left = out.epochDay - today.epochDay
+                        InfoRow(label: "Runs out around", value: out.format(.long), note: left < 0 ? "Past due. Time to check it" : left == 0 ? "Today" : "in \(left) days")
+                    }
+                    if let monthly = LongLasting.monthlyMinor(entries, lastsDays: item.lastsDays) {
+                        InfoRow(label: "Costs about", value: "\(Money.format(monthly, store.currency)) a month", note: "Spread over how long it lasts")
+                    }
+                }
+                if item.expiryDay > 0 {
+                    let daysTo = item.expiryDay - today.epochDay
+                    InfoRow(label: "Best before", value: Day(epochDay: item.expiryDay).format(.long), note: daysTo < 0 ? "Expired" : "in \(daysTo) days")
                 }
                 if let last = lastPriced, let unitPrice = Pantry.unitPriceMinor(last, unit) {
                     InfoRow(label: "Last price", value: "\(Money.format(unitPrice, store.currency)) \(unit.priceLabel)",

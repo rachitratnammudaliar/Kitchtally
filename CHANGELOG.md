@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.10.1
+- iPhone gets everything from 1.10.0: the category-tiles home page with the "Needs buying" strip, long-lasting items (learned duration, run-out date, cost a month, best-before, "Long-lasting?" suggestion), best shop per item, the new shops (Depo, Silas) with hide in Settings, the Frozen and Health categories with Tidy categories, and optional cooking features (Settings → Features).
+
 ## 1.10.0
 - **New home page:** tap a category tile (🥬 Vegetables, 🥛 Dairy & eggs, 🪥 Long-lasting…). A "Needs buying" strip shows what's on To buy, with the names.
 - **Long-lasting items:** mark any item as long-lasting (toothpaste, vitamins, detergent). It stays off the weekly bill and is tracked on its own. Say about how many days one purchase lasts; after two purchases the app learns your real figure, and buying two at once counts for twice as long. It shows when it runs low (with an Add to shop button), what it costs a month, and an optional best-before date. Items you buy about once a month or less get a "Long-lasting?" suggestion.

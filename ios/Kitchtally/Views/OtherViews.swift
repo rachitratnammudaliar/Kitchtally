@@ -554,6 +554,31 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Cooking features", isOn: $store.cookingOn)
+                    Button("Tidy categories") {
+                        let n = store.tidyCategories()
+                        message = n == 0 ? "Nothing to tidy" : "Moved \(n) item\(n == 1 ? "" : "s") out of Other"
+                    }
+                } header: {
+                    Text("Features")
+                } footer: {
+                    Text("Cooking features are Recipes, the meal planner and Cook a meal. Off hides them; your recipes are kept. Tidy categories moves items sitting in Other (like vitamins or fries) to the category their name suggests.")
+                }
+
+                Section {
+                    ForEach(Shops.options(store.usedShops), id: \.self) { shop in
+                        Toggle(shop, isOn: Binding(
+                            get: { !store.hiddenShops.contains(shop) },
+                            set: { on in if on { store.hiddenShops.remove(shop) } else { store.hiddenShops.insert(shop) } }
+                        ))
+                    }
+                } header: {
+                    Text("Shops")
+                } footer: {
+                    Text("Shops you type when buying are saved here automatically. Hide the ones you don't use.")
+                }
+
+                Section {
                     Text("Save your items and history to a file, and restore them on a new phone, Android or iPhone. Photos aren't included.")
                     if let url = exportURL {
                         ShareLink(item: url) { Label("Export backup", systemImage: "square.and.arrow.up") }

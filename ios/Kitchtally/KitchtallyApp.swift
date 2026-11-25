@@ -27,9 +27,11 @@ struct RootView: View {
             PantryView(today: today, tab: $tab)
                 .tabItem { Label("Pantry", systemImage: "house") }
                 .tag(0)
-            RecipesView(today: today)
-                .tabItem { Label("Recipes", systemImage: "fork.knife") }
-                .tag(3)
+            if store.cookingOn {
+                RecipesView(today: today)
+                    .tabItem { Label("Recipes", systemImage: "fork.knife") }
+                    .tag(3)
+            }
             ShoppingView(today: today)
                 .tabItem { Label("To buy", systemImage: "cart") }
                 .badge(toBuy)
@@ -39,6 +41,7 @@ struct RootView: View {
                 .tag(2)
         }
         .onReceive(timer) { _ in today = Day.today() }
+        .onChange(of: store.cookingOn) { on in if !on && tab == 3 { tab = 0 } }
         .alert("Kitchtally", isPresented: Binding(get: { store.problem != nil }, set: { if !$0 { store.problem = nil } })) {
             Button("OK", role: .cancel) { store.problem = nil }
         } message: {

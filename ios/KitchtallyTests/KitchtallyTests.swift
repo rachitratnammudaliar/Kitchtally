@@ -181,7 +181,7 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(QtyUnit.PACKET.label(2), "2 packets")
         XCTAssertEqual(QtyUnit.PACKET.label(1), "1 packet")
         XCTAssertEqual(QtyUnit.KG.label(0.5), "0.5 kg")
-        XCTAssertEqual(Shops.options(["iki", "Aibė", " ", "Aibė"]), ["IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco", "Aibė"])
+        XCTAssertEqual(Shops.options(["iki", "Aibė", " ", "Aibė"]), ["IKI", "Maxima", "Lidl", "Rimi", "Norfa", "Depo", "Silas", "Pepco", "Aibė"])
         XCTAssertEqual(Categories.emojiFor("Bread & bakery"), "🍞")
         XCTAssertEqual(Categories.ordered(["Snacks", "Vegetables", "My stuff", "vegetables"]), ["Vegetables", "Snacks", "My stuff"])
         XCTAssertEqual(Badges.javaHash("hello"), 99162322)
@@ -348,5 +348,41 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertTrue(Categories.isWeekendTreat("Treats & fun"))
         XCTAssertFalse(Categories.isWeekendTreat("Snacks"))
         XCTAssertEqual(Suggestions.forName("Dairy Milk chocolate")?.category, "Treats & fun")
+    }
+
+    func testLongLastingLearnsHowLongOnePurchaseLasts() {
+        let e = [bought(130), bought(70), bought(10)]
+        XCTAssertEqual(LongLasting.expectedDays(e, lastsDays: 0), 60)
+        XCTAssertEqual(LongLasting.runsOutOn(e, lastsDays: 0), d(10).plusDays(60))
+        XCTAssertFalse(LongLasting.runningLow(e, lastsDays: 0, today: today))
+        XCTAssertTrue(LongLasting.looksLongLasting(e))
+    }
+
+    func testLongLastingStockUpLastsLonger() {
+        // Two bought at once lasted 60 days, so one lasts 30 and is due 10 days ago.
+        let e = [bought(100, 2), bought(40)]
+        XCTAssertEqual(LongLasting.expectedDays(e, lastsDays: 0), 30)
+        XCTAssertTrue(LongLasting.runningLow(e, lastsDays: 0, today: today))
+    }
+
+    func testLongLastingUsesYourNumberUntilThereIsHistory() {
+        let e = [bought(20)]
+        XCTAssertEqual(LongLasting.expectedDays(e, lastsDays: 60), 60)
+        XCTAssertEqual(LongLasting.runsOutOn(e, lastsDays: 60), d(20).plusDays(60))
+        XCTAssertNil(LongLasting.runsOutOn(e, lastsDays: 0))
+        XCTAssertFalse(LongLasting.looksLongLasting(e))
+        XCTAssertEqual(LongLasting.monthlyMinor([bought(20, 1, 200)], lastsDays: 60), 100)
+    }
+
+    func testBestShopIsTheCheapestPerUnit() {
+        let e = [bought(9, 1, 32, "IKI"), bought(5, 1, 54, "Lidl"), bought(2, 1, 32, "iki")]
+        let by = ShopCompare.byShop(e, .PACKET)
+        XCTAssertEqual(by.map(\.shop), ["IKI", "Lidl"])
+        XCTAssertEqual(by.first?.purchases, 2)
+    }
+
+    func testVitaminsAndFriesGetTheirOwnCategories() {
+        XCTAssertEqual(Suggestions.forName("Vitamin D3 Pills")?.category, "Health")
+        XCTAssertEqual(Suggestions.forName("French Fries")?.category, "Frozen")
     }
 }
