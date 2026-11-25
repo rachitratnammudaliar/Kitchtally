@@ -299,7 +299,7 @@ fun KitchtallyRoot(
         "settings" -> SettingsScreen(vm = vm, currency = currency, onBack = { route = tab })
         "recipe" -> EditRecipeScreen(vm = vm, state = state, id = id1, today = today, onDone = { route = tab })
         else -> MainTabs(
-            vm = vm, state = state, tab = tab, today = today, currency = currency,
+            vm = vm, state = state, tabIn = tab, today = today, currency = currency,
             onTab = { tab = it; route = it },
             onOpen = { route = "item:$it" },
             onAdd = { route = "edit:0" },
