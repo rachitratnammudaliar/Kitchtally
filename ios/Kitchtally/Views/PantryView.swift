@@ -68,7 +68,7 @@ struct PantryView: View {
                     let longItems = shown.filter { store.isLong($0.id) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
                     if filter.isEmpty && query.isEmpty {
                         homeTiles(categories: categories, longItems: longItems)
-                    } else {
+                    }
                     if !filter.isEmpty {
                         Section { Button("← All categories") { filter = "" } }
                     }
@@ -108,7 +108,6 @@ struct PantryView: View {
                                 ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
                             }
                         }
-                    }
                     }
                 }
             }

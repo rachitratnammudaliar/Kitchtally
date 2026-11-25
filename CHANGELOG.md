@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.10.2
+- The full list is back under the category tiles on the home page: scroll down to see every item, grouped by category, like before. Tap a tile to jump to just that category.
+
 ## 1.10.1
 - iPhone gets everything from 1.10.0: the category-tiles home page with the "Needs buying" strip, long-lasting items (learned duration, run-out date, cost a month, best-before, "Long-lasting?" suggestion), best shop per item, the new shops (Depo, Silas) with hide in Settings, the Frozen and Health categories with Tidy categories, and optional cooking features (Settings → Features).
 

@@ -658,7 +658,7 @@ private fun PantryList(
                 }
             }
         }
-        if (!showTiles && groups.isEmpty()) {
+        if (groups.isEmpty()) {
             item(key = "no-results") {
                 Text(
                     "Nothing matches \"$query\"",
@@ -673,7 +673,7 @@ private fun PantryList(
                 TextButton(onClick = { filter = "" }) { Text("← All categories") }
             }
         }
-        if (!showTiles) visibleGroups.forEach { (category, items) ->
+        visibleGroups.forEach { (category, items) ->
             item(key = "cat-$category") {
                 Text(
                     if (category == UNSURE_GROUP || category == NOREBUY_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",
