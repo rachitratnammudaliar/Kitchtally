@@ -153,7 +153,7 @@ data class Entry(
 object Categories {
     val presets = listOf(
         "Vegetables", "Fruit", "Staples", "Sauces & spreads", "Dairy & eggs", "Meat & protein",
-        "Bread & bakery", "Spices", "Snacks", "Drinks", "Treats & fun", "Personal care", "Household", "Other",
+        "Bread & bakery", "Spices", "Snacks", "Frozen", "Drinks", "Treats & fun", "Personal care", "Health", "Household", "Other",
     )
 
     /** Chocolates, soda and the like: only on To buy from Thursday, ready for the weekend. */
@@ -174,7 +174,7 @@ object Categories {
         "vegetables" to "🥬", "fruit" to "🍎", "staples" to "🌾", "sauces & spreads" to "🥫",
         "dairy & eggs" to "🥛", "meat & protein" to "🍗", "bread & bakery" to "🍞", "spices" to "🌶️",
         "snacks" to "🍪", "drinks" to "🥤", "treats & fun" to "🍫", "personal care" to "🧴", "household" to "🧻", "other" to "📦",
-        "groceries" to "🛒",
+        "groceries" to "🛒", "frozen" to "❄️", "health" to "💊",
     )
 
     /** A picture for the category; the user's own categories get a jar. */
@@ -190,6 +190,8 @@ object Suggestions {
     // Checked in order, so more specific names come first: "garlic sauce" is a sauce,
     // "eggplant" a vegetable, "hair oil" personal care, "peanut butter" a spread.
     private val rules: List<Pair<List<String>, Suggestion>> = listOf(
+        listOf("vitamin", "supplement", "omega", "magnesium", "zinc", "multivit", "probiotic", "paracetamol", "ibuprofen", "plaster") to s("Health", QtyUnit.PIECE, Life.LONG),
+        listOf("french fries", "fries", "frozen") to s("Frozen", QtyUnit.PACKET, Life.MEDIUM),
         listOf("ice cream") to s("Snacks", QtyUnit.LEVEL, Life.LONG),
         listOf("chocolate", "candy", "candies", "sweets", "gummy", "gummies", "soda", "cola", "pepsi", "fanta", "sprite", "energy drink", "lollipop", "wafer", "brownie", "donut", "doughnut") to s("Treats & fun", QtyUnit.PACKET, Life.LONG),
         listOf("toilet paper", "toilet roll", "tissue", "kitchen roll", "paper towel", "napkin") to s("Household", QtyUnit.PACKET, Life.LONG),
@@ -239,12 +241,79 @@ object Suggestions {
 }
 
 object Shops {
-    val presets = listOf("IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco")
+    val presets = listOf("IKI", "Maxima", "Lidl", "Rimi", "Norfa", "Depo", "Silas", "Pepco")
 
     /** Presets first, then names the user typed before, without duplicates (ignoring case). */
     fun options(used: List<String>): List<String> {
         val all = presets + used.map { it.trim() }.filter { it.isNotEmpty() }
         return all.distinctBy { it.lowercase() }
+    }
+}
+
+/** Best shop for an item, from what you paid there. */
+data class ShopPrice(val shop: String, val unitPriceMinor: Long, val purchases: Int)
+
+object ShopCompare {
+    /** Average price per unit at each shop (priced purchases only), cheapest first. Needs at least two shops to mean anything. */
+    fun byShop(entries: List<Entry>, unit: QtyUnit): List<ShopPrice> =
+        entries.filter { it.type == EventType.BOUGHT && it.priceMinor != null && it.quantity > 0 && it.shop.isNotBlank() }
+            .groupBy { it.shop.trim().lowercase() }
+            .mapNotNull { (_, list) ->
+                val prices = list.mapNotNull { Pantry.unitPriceMinor(it, unit) }
+                if (prices.isEmpty()) null else ShopPrice(list.first().shop.trim(), prices.sum() / prices.size, prices.size)
+            }
+            .sortedBy { it.unitPriceMinor }
+}
+
+/** Items that last weeks or months: when they were bought, how long they last, when they run low. */
+object LongLasting {
+    private fun boughtDays(entries: List<Entry>): List<Pair<Long, Double>> =
+        entries.filter { it.type == EventType.BOUGHT && it.quantity > 0 }
+            .groupBy { it.date.toEpochDay() }
+            .map { (day, list) -> day to list.sumOf { it.quantity } }
+            .sortedBy { it.first }
+
+    /** Days one unit lasts, from your own purchases (gap to the next purchase divided by how much you bought). Null with fewer than two purchases. */
+    fun learnedDaysPerUnit(entries: List<Entry>): Double? {
+        val b = boughtDays(entries)
+        if (b.size < 2) return null
+        val per = (0 until b.size - 1).map { (b[it + 1].first - b[it].first) / b[it].second }.filter { it > 0 }.sorted()
+        if (per.isEmpty()) return null
+        return per[per.size / 2]
+    }
+
+    /** About how many days the last purchase lasts: learned from your history, else the number you set. Null if unknown. */
+    fun expectedDays(entries: List<Entry>, lastsDays: Int): Int? {
+        val b = boughtDays(entries)
+        val perUnit = learnedDaysPerUnit(entries)
+        if (perUnit != null && b.isNotEmpty()) return Math.round(perUnit * b.last().second).toInt().coerceAtLeast(1)
+        return lastsDays.takeIf { it > 0 }
+    }
+
+    /** The day it probably runs out, or null if never bought or the duration is unknown. */
+    fun runsOutOn(entries: List<Entry>, lastsDays: Int): LocalDate? {
+        val last = boughtDays(entries).lastOrNull() ?: return null
+        val days = expectedDays(entries, lastsDays) ?: return null
+        return LocalDate.ofEpochDay(last.first + days)
+    }
+
+    /** Running low within [withinDays] days (or already past). */
+    fun runningLow(entries: List<Entry>, lastsDays: Int, today: LocalDate, withinDays: Long = 7): Boolean =
+        runsOutOn(entries, lastsDays)?.let { it.toEpochDay() - today.toEpochDay() <= withinDays } == true
+
+    /** Bought three or more times, a month or more apart: probably long-lasting. */
+    fun looksLongLasting(entries: List<Entry>): Boolean {
+        val b = boughtDays(entries)
+        if (b.size < 3) return false
+        val gaps = (0 until b.size - 1).map { b[it + 1].first - b[it].first }.sorted()
+        return gaps[gaps.size / 2] >= 35
+    }
+
+    /** Cost spread over the months it lasts, in cents per month, from the last priced purchase. Null if unknown. */
+    fun monthlyMinor(entries: List<Entry>, lastsDays: Int): Long? {
+        val priced = Pantry.lastPriced(entries) ?: return null
+        val days = expectedDays(entries, lastsDays) ?: return null
+        return Math.round((priced.priceMinor ?: return null) * 30.0 / days)
     }
 }
 

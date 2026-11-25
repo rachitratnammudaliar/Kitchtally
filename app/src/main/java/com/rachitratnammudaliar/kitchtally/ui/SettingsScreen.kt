@@ -125,6 +125,26 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             Hint("Only shown on Weekly, under Show spending. Leave it empty to turn it off.")
 
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionLabel("Features")
+            val cookingOn by vm.cookingOn.collectAsStateWithLifecycle()
+            SwitchRow("Cooking features", "Recipes, the meal planner and Cook a meal. Off hides them; your recipes are kept", cookingOn) { vm.setCookingOn(it) }
+            val settingsState by vm.state.collectAsStateWithLifecycle()
+            FilledTonalButton(onClick = {
+                val st = vm.state.value ?: return@FilledTonalButton
+                vm.tidyCategories(st) { n -> scope.launch { snackbar.showSnackbar(if (n == 0) "Nothing to tidy" else "Moved $n item${if (n == 1) "" else "s"} out of Other") } }
+            }) { Text("Tidy categories") }
+            Hint("Moves items sitting in Other (like vitamins or fries) to the category their name suggests.")
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionLabel("Shops")
+            val hiddenShops by vm.hiddenShops.collectAsStateWithLifecycle()
+            val allShops = com.rachitratnammudaliar.kitchtally.domain.Shops.options(settingsState?.usedShops.orEmpty())
+            allShops.forEach { shop ->
+                SwitchRow(shop, "Show in the shop buttons", shop !in hiddenShops) { on -> vm.setShopHidden(shop, !on) }
+            }
+            Hint("Shops you type when buying are saved here automatically. Hide the ones you don't use.")
+
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Something wrong?")
             Text(
                 "Sends nothing by itself. It opens your share menu with the app version, your phone model and the last error, so you can send it to the developer.",

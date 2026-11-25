@@ -30,6 +30,7 @@ import com.rachitratnammudaliar.kitchtally.domain.Life
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
+import com.rachitratnammudaliar.kitchtally.domain.Suggestions
 import com.rachitratnammudaliar.kitchtally.domain.QtyUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,7 +63,7 @@ data class PantryState(
     fun stock(id: Long): Double = Pantry.stock(entries(id))
 
     /** Face cream, toilet paper, shower gel and the like are counted in Budget, not in the weekly shop. */
-    fun isLong(id: Long): Boolean = item(id)?.category?.let { Categories.isLongLasting(it) } == true
+    fun isLong(id: Long): Boolean = item(id)?.let { it.longLasting || Categories.isLongLasting(it.category) } == true
 
     /** Shop names typed before, newest first, for the shop buttons. */
     val usedShops: List<String> = events.sortedByDescending { it.createdAt }.map { it.shop }.filter { it.isNotBlank() }
@@ -74,8 +75,27 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = db.pantry()
     private val prefs = Prefs(app)
 
-    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes(), dao.observeRecipes()) { items, events, notes, recipes ->
-        PantryState(items, events, notes, recipes)
+    private val _cookingOn = MutableStateFlow(prefs.cookingOn)
+    /** Recipes, meal planner and "Cook a meal"; off unless switched on in Settings. */
+    val cookingOn: StateFlow<Boolean> = _cookingOn.asStateFlow()
+
+    fun setCookingOn(on: Boolean) {
+        prefs.cookingOn = on
+        _cookingOn.value = on
+    }
+
+    private val _hiddenShops = MutableStateFlow(prefs.hiddenShops)
+    val hiddenShops: StateFlow<Set<String>> = _hiddenShops.asStateFlow()
+
+    fun setShopHidden(shop: String, hidden: Boolean) {
+        val next = if (hidden) _hiddenShops.value + shop else _hiddenShops.value - shop
+        prefs.hiddenShops = next
+        _hiddenShops.value = next
+    }
+
+    val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes(), dao.observeRecipes(), _cookingOn) { items, events, notes, recipes, cooking ->
+        // With cooking off, recipes are hidden everywhere (the data stays safe).
+        PantryState(items, events, notes, if (cooking) recipes else emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Quick taps are handled one at a time, so stock can't go below zero. */
@@ -345,6 +365,29 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setNoRebuy(item: Item, on: Boolean) {
         viewModelScope.launch { dao.setNoRebuy(item.id, on) }
+    }
+
+    /** Marks an item as long-lasting (off the weekly bill, tracked on its own), with about how many days one purchase lasts. */
+    fun setLongLasting(item: Item, on: Boolean, lastsDays: Int = item.lastsDays) {
+        viewModelScope.launch { dao.update((dao.item(item.id) ?: return@launch).copy(longLasting = on, lastsDays = lastsDays.coerceIn(0, 3650))) }
+    }
+
+    fun setExpiry(item: Item, epochDay: Long) {
+        viewModelScope.launch { dao.update((dao.item(item.id) ?: return@launch).copy(expiryDay = epochDay.coerceAtLeast(0L))) }
+    }
+
+    /** Files items sitting in "Other" under the category their name suggests. Returns how many moved. */
+    fun tidyCategories(state: PantryState, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            var moved = 0
+            state.items.filter { it.category.equals("Other", ignoreCase = true) }.forEach { item ->
+                val suggested = Suggestions.forName(item.name) ?: return@forEach
+                if (suggested.category.equals("Other", ignoreCase = true)) return@forEach
+                dao.update((dao.item(item.id) ?: return@forEach).copy(category = suggested.category, longLasting = item.longLasting || suggested.category == "Health"))
+                moved++
+            }
+            onDone(moved)
+        }
     }
 
     fun setUnsure(item: Item, unsure: Boolean) {

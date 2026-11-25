@@ -172,6 +172,16 @@ class Prefs(context: Context) {
         get() = prefs.getLong("for_next_week_until", 0L)
         set(value) = prefs.edit().putLong("for_next_week_until", value).apply()
 
+    /** Recipes, the meal planner and "Cook a meal". Off unless you turn them on. */
+    var cookingOn: Boolean
+        get() = prefs.getBoolean("cooking_on", false)
+        set(value) = prefs.edit().putBoolean("cooking_on", value).apply()
+
+    /** Shops you hid from the shop buttons. */
+    var hiddenShops: Set<String>
+        get() = prefs.getStringSet("hidden_shops", emptySet()) ?: emptySet()
+        set(value) = prefs.edit().putStringSet("hidden_shops", value).apply()
+
     /** Monthly budget in cents; 0 means off. */
     var budgetMinor: Long
         get() = prefs.getLong("budget_minor", 0L)

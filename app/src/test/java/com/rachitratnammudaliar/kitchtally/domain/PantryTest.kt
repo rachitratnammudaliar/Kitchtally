@@ -245,7 +245,7 @@ class PantryTest {
 
     @Test
     fun shopOptionsKeepPresetsFirstWithoutDuplicates() {
-        assertEquals(listOf("IKI", "Norfa", "Maxima", "Lidl", "Rimi", "Pepco", "Aibė"), Shops.options(listOf("iki", "Aibė", " ", "Aibė")))
+        assertEquals(listOf("IKI", "Maxima", "Lidl", "Rimi", "Norfa", "Depo", "Silas", "Pepco", "Aibė"), Shops.options(listOf("iki", "Aibė", " ", "Aibė")))
     }
 
     @Test
@@ -381,5 +381,46 @@ class PantryTest {
         assertTrue(Categories.isWeekendTreat("Treats & fun"))
         assertFalse(Categories.isWeekendTreat("Snacks"))
         assertEquals("Treats & fun", Suggestions.forName("Dairy Milk chocolate")?.category)
+    }
+
+    @Test
+    fun longLastingLearnsHowLongOnePurchaseLasts() {
+        val e = listOf(bought(130), bought(70), bought(10))
+        assertEquals(60, LongLasting.expectedDays(e, 0))
+        assertEquals(d(10).plusDays(60), LongLasting.runsOutOn(e, 0))
+        assertFalse(LongLasting.runningLow(e, 0, d(0)))
+        assertTrue(LongLasting.looksLongLasting(e))
+    }
+
+    @Test
+    fun longLastingStockUpLastsLonger() {
+        // Two bought at once lasted 60 days, so one lasts 30 and is due 10 days ago.
+        val e = listOf(bought(100, qty = 2.0), bought(40))
+        assertEquals(30, LongLasting.expectedDays(e, 0))
+        assertTrue(LongLasting.runningLow(e, 0, d(0)))
+    }
+
+    @Test
+    fun longLastingUsesYourNumberUntilThereIsHistory() {
+        val e = listOf(bought(20))
+        assertEquals(60, LongLasting.expectedDays(e, 60))
+        assertEquals(d(20).plusDays(60), LongLasting.runsOutOn(e, 60))
+        assertNull(LongLasting.runsOutOn(e, 0))
+        assertFalse(LongLasting.looksLongLasting(e))
+        assertEquals(100L, LongLasting.monthlyMinor(listOf(bought(20, price = 200)), 60))
+    }
+
+    @Test
+    fun bestShopIsTheCheapestPerUnit() {
+        val e = listOf(bought(9, price = 32, shop = "IKI"), bought(5, price = 54, shop = "Lidl"), bought(2, price = 32, shop = "iki"))
+        val by = ShopCompare.byShop(e, QtyUnit.PACKET)
+        assertEquals(listOf("IKI", "Lidl"), by.map { it.shop })
+        assertEquals(2, by.first().purchases)
+    }
+
+    @Test
+    fun vitaminsAndFriesGetTheirOwnCategories() {
+        assertEquals("Health", Suggestions.forName("Vitamin D3 Pills")?.category)
+        assertEquals("Frozen", Suggestions.forName("French Fries")?.category)
     }
 }

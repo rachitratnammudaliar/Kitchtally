@@ -68,6 +68,13 @@ data class Item(
     // Added in database version 8 (app 1.9.0).
     /** Skipping it on To buy until this epoch day (not this week, or a break). 0 = not skipping. */
     val skipUntil: Long = 0,
+    // Added in database version 9 (app 1.10.0).
+    /** Lasts weeks or months (toothpaste, vitamins): kept out of the weekly bill, tracked on its own. */
+    val longLasting: Boolean = false,
+    /** About how many days one purchase lasts; 0 = not set. The app learns the real figure from your purchases. */
+    val lastsDays: Int = 0,
+    /** Best-before date (epoch day); 0 = none. */
+    val expiryDay: Long = 0,
 )
 
 /** Something to buy that isn't a pantry item, typed on the shopping list. */
@@ -324,7 +331,15 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 8, exportSchema = false)
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE items ADD COLUMN longLasting INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN lastsDays INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE items ADD COLUMN expiryDay INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 9, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -337,7 +352,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .build().also { instance = it }
             }
     }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.0
+- **New home page:** tap a category tile (🥬 Vegetables, 🥛 Dairy & eggs, 🪥 Long-lasting…). A "Needs buying" strip shows what's on To buy, with the names.
+- **Long-lasting items:** mark any item as long-lasting (toothpaste, vitamins, detergent). It stays off the weekly bill and is tracked on its own. Say about how many days one purchase lasts; after two purchases the app learns your real figure, and buying two at once counts for twice as long. It shows when it runs low (with an Add to shop button), what it costs a month, and an optional best-before date. Items you buy about once a month or less get a "Long-lasting?" suggestion.
+- **Best shop** per item, from what you paid at each shop. New shops: Depo and Silas. Hide shops you don't use in Settings.
+- **Cooking features are optional:** Recipes, the meal planner and Cook a meal are off by default (Settings → Features). Your recipes are kept.
+- New categories: Frozen and Health. "Tidy categories" in Settings files items sitting in Other.
+- Database moves to version 9; your data and backups carry over. Android first, iPhone follows.
+
 ## 1.9.1
 - iPhone gets everything from 1.9.0: Not this week and breaks, Skipping section, skip all that's left, the new-week review, Treats & fun, the What's new note and the backup reminder. (Also includes Recipes and the meal planner, as in 1.8.0.)
 

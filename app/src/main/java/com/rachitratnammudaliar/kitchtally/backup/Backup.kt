@@ -42,6 +42,9 @@ object Backup {
                     .put("noRebuy", i.noRebuy)
                     .put("buyPriority", i.buyPriority)
                     .put("skipUntil", i.skipUntil)
+                    .put("longLasting", i.longLasting)
+                    .put("lastsDays", i.lastsDays)
+                    .put("expiryDay", i.expiryDay)
                     .put("packSize", i.packSize)
                     .put("unsure", i.unsure)
                     .put("countMeals", i.countMeals)
@@ -117,6 +120,9 @@ object Backup {
                 noRebuy = o.optBoolean("noRebuy", false),
                 buyPriority = o.optInt("buyPriority", 1).coerceIn(0, 2),
                 skipUntil = o.optLong("skipUntil", 0L).coerceAtLeast(0L),
+                longLasting = o.optBoolean("longLasting", false),
+                lastsDays = o.optInt("lastsDays", 0).coerceIn(0, 3650),
+                expiryDay = o.optLong("expiryDay", 0L).coerceAtLeast(0L),
                 unsure = o.optBoolean("unsure", false),
                 packSize = o.optDouble("packSize", 0.0).let { if (it.isNaN() || it < 0) 0.0 else it.coerceAtMost(10_000.0) },
                 countMeals = o.optBoolean("countMeals", false),

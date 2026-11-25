@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.data.Event
@@ -173,6 +174,9 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
     var stockText by rememberSaveable { mutableStateOf("") }
     var refill by rememberSaveable { mutableStateOf(false) }
     var unsure by rememberSaveable { mutableStateOf(false) }
+    var longLasting by rememberSaveable { mutableStateOf(false) }
+    var lastsText by rememberSaveable { mutableStateOf("") }
+    var expiryDay by rememberSaveable { mutableStateOf(0L) }
     var countMeals by rememberSaveable { mutableStateOf(false) }
     var mealsText by rememberSaveable { mutableStateOf("") }
     var lowInMeals by rememberSaveable { mutableStateOf(false) }
@@ -197,6 +201,9 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             mealsText = if (existing.mealsPerUnit > 0) Qty.format(Qty.round(existing.mealsPerUnit * (if (existing.packSize > 0) existing.packSize else 1.0))) else ""
             refill = existing.refillNeeded
             unsure = existing.unsure
+            longLasting = existing.longLasting
+            lastsText = if (existing.lastsDays > 0) existing.lastsDays.toString() else ""
+            expiryDay = existing.expiryDay
             notes = existing.notes
             photo = existing.photoFile
             originalPhoto = existing.photoFile
@@ -247,6 +254,9 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
             lowAt = Qty.round(lowAtValue ?: 1.0),
             refillNeeded = refill && !unsure,
             unsure = unsure,
+            longLasting = longLasting,
+            lastsDays = if (longLasting) lastsText.trim().toIntOrNull()?.coerceIn(0, 3650) ?: 0 else 0,
+            expiryDay = expiryDay,
             notes = notes.trim(),
             photoFile = photo,
             step = stepValue ?: 1.0,
@@ -425,6 +435,26 @@ fun EditItemScreen(vm: PantryViewModel, state: PantryState?, id: Long, onDone: (
 
             SwitchRow("Refill needed", "Put it on the shopping list now", refill) { refill = it; if (it) unsure = false }
             SwitchRow("Not sure to buy again", "Never put it on the shopping list until you switch this off", unsure) { unsure = it; if (it) refill = false }
+            SwitchRow("Long-lasting", "Toothpaste, vitamins, detergent: kept out of the weekly bill and tracked on their own", longLasting) { longLasting = it }
+            if (longLasting) {
+                OutlinedTextField(
+                    value = lastsText,
+                    onValueChange = { lastsText = it.filter { c -> c.isDigit() }.take(4) },
+                    label = { Text("One purchase lasts about … days (optional)") },
+                    placeholder = { Text("e.g. 60") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Hint("After two purchases the app uses your real figure instead.")
+                val editContext = LocalContext.current
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        pickDate(editContext, if (expiryDay > 0) LocalDate.ofEpochDay(expiryDay) else LocalDate.now().plusMonths(6)) { expiryDay = it.toEpochDay() }
+                    }) { Text(if (expiryDay > 0) "Best before ${LocalDate.ofEpochDay(expiryDay)}" else "Best-before date (optional)") }
+                    if (expiryDay > 0) TextButton(onClick = { expiryDay = 0L }) { Text("Clear") }
+                }
+            }
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it.take(500) },
@@ -622,7 +652,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
 
             SectionLabel("Shop")
             NamedChoice(
-                options = Shops.options(state?.usedShops.orEmpty()),
+                options = Shops.options(state?.usedShops.orEmpty()).filter { it == shop || it !in vm.hiddenShops.value },
                 selected = shop,
                 onSelect = { shop = it },
                 otherLabel = "Shop name",

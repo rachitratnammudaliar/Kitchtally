@@ -97,6 +97,7 @@ import com.rachitratnammudaliar.kitchtally.data.lifeValue
 import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.LongLasting
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Money
@@ -204,6 +205,7 @@ fun skippedFromList(item: Item, state: PantryState, today: LocalDate): Boolean =
 
 const val UNSURE_GROUP = "🤔  Not sure to buy again"
 const val NOREBUY_GROUP = "🚫  No need to buy again"
+const val LONG_GROUP = "🪥  Long-lasting"
 
 /** Preset categories in order, then the user's own alphabetically. */
 fun orderedCategories(used: List<String>): List<String> {
@@ -316,7 +318,7 @@ fun KitchtallyRoot(
 private fun MainTabs(
     vm: PantryViewModel,
     state: PantryState?,
-    tab: String,
+    tabIn: String,
     today: LocalDate,
     currency: String,
     onTab: (String) -> Unit,
@@ -333,6 +335,8 @@ private fun MainTabs(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val cookingOn by vm.cookingOn.collectAsStateWithLifecycle()
+    val tab = if (tabIn == "recipes" && !cookingOn) "pantry" else tabIn
     val toBuy = state?.let { toBuyCount(it, today) } ?: 0
     var cooking by rememberSaveable { mutableStateOf(openCook) }
     val tickedNow = state?.let { s -> val planned = plannedNeeds(s).map { it.item.id }.toSet(); ticked.filter { id -> s.item(id)?.let { onShoppingList(it, s, today) || id in planned } == true } }.orEmpty()
@@ -373,7 +377,7 @@ private fun MainTabs(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(selected = tab == "pantry", onClick = { onTab("pantry") }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("Pantry") })
-                NavigationBarItem(selected = tab == "recipes", onClick = { onTab("recipes") }, icon = { Text("🍲") }, label = { Text("Recipes") })
+                if (cookingOn) NavigationBarItem(selected = tab == "recipes", onClick = { onTab("recipes") }, icon = { Text("🍲") }, label = { Text("Recipes") })
                 NavigationBarItem(
                     selected = tab == "shopping",
                     onClick = { onTab("shopping") },
@@ -421,7 +425,7 @@ private fun MainTabs(
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
             "recipes" -> RecipesScreen(vm, s, today, currency, snackbar, onEditRecipe, modifier)
-            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, onSettings, modifier, openAdjust)
+            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, onSettings, modifier, openAdjust, cookingOn)
         }
     }
 }
@@ -441,6 +445,7 @@ private fun PantryList(
     onSettings: () -> Unit,
     modifier: Modifier,
     openAdjust: Long = 0L,
+    cookingOn: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var filter by rememberSaveable { mutableStateOf("") }
@@ -453,10 +458,10 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🍲  Recipes tab: cook a dish and the stock goes down for you. Plan meals and what's missing lands on To buy.")
-                    Text("😌  Not this week: skip things on To buy without them nagging you. Longer breaks too.")
-                    Text("🍫  Treats & fun: chocolates and soda wait until Thursday, ready for the weekend.")
-                    Text("🗓️  A new week asks \"Still want these?\" so your list matches what you feel like.")
+                    Text("🧩  A new home page: tap a category tile. A strip at the top shows what needs buying.")
+                    Text("🪥  Long-lasting things (toothpaste, vitamins) stay off your weekly bill. Mark any item, and see when it runs low.")
+                    Text("🏪  Each item shows its best shop. New shops: Depo and Silas.")
+                    Text("🍲  Recipes and Cook a meal are now optional: Settings → Features.")
                 }
             },
             confirmButton = { TextButton(onClick = { showNew = false; vm.markWhatsNewSeen() }) { Text("Got it") } },
@@ -486,18 +491,25 @@ private fun PantryList(
     }
 
     val categories = orderedCategories(state.usedCategories)
-    val active = categories.firstOrNull { it == filter }
+    val active = categories.firstOrNull { it.equals(filter, ignoreCase = true) }
     val query = search.trim()
     val shown = state.items.filter {
         (active == null || it.category.equals(active, ignoreCase = true)) &&
             (query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.notes.contains(query, ignoreCase = true))
     }
     // Items you're not sure about get their own group at the bottom.
+    val longItems = shown.filter { state.isLong(it.id) }.sortedBy { it.name.lowercase() }
     val groups = categories.mapNotNull { c ->
         val list = shown.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
         if (list.isEmpty()) null else c to list
     } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it }) +
-        listOfNotNull(shown.filter { it.noRebuy }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { NOREBUY_GROUP to it })
+        listOfNotNull(shown.filter { it.noRebuy }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { NOREBUY_GROUP to it }) +
+        listOfNotNull(if (filter == LONG_GROUP) longItems.takeIf { it.isNotEmpty() }?.let { LONG_GROUP to it } else null)
+    val visibleGroups = if (filter.isNotEmpty()) groups.filter { it.first.equals(filter, ignoreCase = true) } else groups
+    val showTiles = filter.isEmpty() && query.isEmpty()
+    val needsList = state.items.filter { onShoppingList(it, state, today) }
+    val lowLong = state.items.filter { state.isLong(it.id) && !it.noRebuy && !onShoppingList(it, state, today) && LongLasting.runningLow(state.entries(it.id), it.lastsDays, today) }
+    val expiring = state.items.filter { it.expiryDay > 0 && it.expiryDay - today.toEpochDay() <= 14 }
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
     val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
@@ -549,8 +561,10 @@ private fun PantryList(
                         StatTile(week.itemsBought.toString(), "bought new", Modifier.weight(1f)) { onTab("week") }
                         StatTile((toBuy + state.notes.size).toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = onCook, modifier = Modifier.fillMaxWidth()) { Text("🍳  Cook a meal") }
+                    if (cookingOn) {
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = onCook, modifier = Modifier.fillMaxWidth()) { Text("🍳  Cook a meal") }
+                    }
                 }
             }
         }
@@ -566,7 +580,85 @@ private fun PantryList(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (groups.isEmpty()) {
+        if (showTiles && needsList.isNotEmpty()) {
+            item(key = "needs-strip") {
+                Card(
+                    Modifier.fillMaxWidth().clickable { onTab("shopping") },
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("🛒  Needs buying · ${needsList.size}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text(
+                            needsList.take(6).joinToString(", ") { it.name } + if (needsList.size > 6) " and ${needsList.size - 6} more" else "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        )
+                    }
+                }
+            }
+        }
+        if (showTiles && (lowLong.isNotEmpty() || expiring.isNotEmpty())) {
+            item(key = "long-strip") {
+                Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("🪥  Long-lasting, coming up", style = MaterialTheme.typography.titleSmall)
+                        lowLong.take(4).forEach { it0 ->
+                            val out = LongLasting.runsOutOn(state.entries(it0.id), it0.lastsDays)
+                            val left = out?.let { o -> o.toEpochDay() - today.toEpochDay() } ?: 0L
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(it0.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(if (left <= 0) "Running low about now" else "Running low in about $left days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                TextButton(onClick = { vm.setRefillNeeded(it0, true) }) { Text("Add to shop") }
+                            }
+                        }
+                        expiring.take(3).forEach { it0 ->
+                            val d = it0.expiryDay - today.toEpochDay()
+                            Text("⏳  ${it0.name}: " + if (d < 0) "past its best-before date" else "best before in $d days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        if (showTiles) {
+            val tiles = categories.map { c ->
+                val inCat = state.items.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }
+                Triple(c, "${Categories.emojiFor(c)}\n$c", inCat to inCat.count { onShoppingList(it, state, today) })
+            } + listOfNotNull(
+                longItems.takeIf { it.isNotEmpty() }?.let { Triple(LONG_GROUP, LONG_GROUP.replaceFirst("  ", "\n"), it to it.count { x -> onShoppingList(x, state, today) }) },
+                state.items.filter { it.unsure }.takeIf { it.isNotEmpty() }?.let { Triple(UNSURE_GROUP, UNSURE_GROUP.replaceFirst("  ", "\n"), it to 0) },
+                state.items.filter { it.noRebuy }.takeIf { it.isNotEmpty() }?.let { Triple(NOREBUY_GROUP, NOREBUY_GROUP.replaceFirst("  ", "\n"), it to 0) },
+            )
+            tiles.chunked(2).forEach { pair ->
+                item(key = "tiles-${pair.first().first}") {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        pair.forEach { (key, label, data) ->
+                            val (list, need) = data
+                            Card(
+                                modifier = Modifier.weight(1f).clickable { filter = key },
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = if (need > 0) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant),
+                            ) {
+                                Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    val parts = label.split("\n")
+                                    Text(parts[0], style = MaterialTheme.typography.headlineMedium)
+                                    Text(parts.getOrElse(1) { "" }, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                                    Text(
+                                        "${list.size} item${if (list.size == 1) "" else "s"}" + if (need > 0) " · $need to buy" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        if (!showTiles && groups.isEmpty()) {
             item(key = "no-results") {
                 Text(
                     "Nothing matches \"$query\"",
@@ -576,12 +668,12 @@ private fun PantryList(
                 )
             }
         }
-        if (categories.size > 1) {
-            item(key = "filter") {
-                ChipRow(listOf<String?>(null) + categories, active, { it ?: "All" }, { filter = it ?: "" })
+        if (filter.isNotEmpty()) {
+            item(key = "back") {
+                TextButton(onClick = { filter = "" }) { Text("← All categories") }
             }
         }
-        groups.forEach { (category, items) ->
+        if (!showTiles) visibleGroups.forEach { (category, items) ->
             item(key = "cat-$category") {
                 Text(
                     if (category == UNSURE_GROUP || category == NOREBUY_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",

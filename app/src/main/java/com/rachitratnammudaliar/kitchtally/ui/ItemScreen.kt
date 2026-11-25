@@ -59,8 +59,11 @@ import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
+import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.EventType
+import com.rachitratnammudaliar.kitchtally.domain.LongLasting
 import com.rachitratnammudaliar.kitchtally.domain.Meals
+import com.rachitratnammudaliar.kitchtally.domain.ShopCompare
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
@@ -172,6 +175,19 @@ fun ItemScreen(
                 checked = item.unsure,
                 onChange = { vm.setUnsure(item, it) },
             )
+            SwitchRow(
+                title = "Long-lasting",
+                subtitle = if (item.longLasting || Categories.isLongLasting(item.category)) "Kept out of the weekly bill and tracked on its own" else "Toothpaste, vitamins, detergent: off the weekly bill",
+                checked = item.longLasting || Categories.isLongLasting(item.category),
+                onChange = { vm.setLongLasting(item, it) },
+            )
+            if (!item.longLasting && !Categories.isLongLasting(item.category) && LongLasting.looksLongLasting(entries)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Hint("You buy this about once a month or less. Long-lasting?")
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { vm.setLongLasting(item, true) }) { Text("Yes") }
+                }
+            }
             if (item.hiddenFromList) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Hint("Hidden from the shopping list until you buy it again.")
@@ -201,6 +217,32 @@ fun ItemScreen(
                     Pantry.dailyUse(entries, today)?.let { rate ->
                         HorizontalDivider()
                         InfoRow("You use", "about ${if (unit.isLevel) unit.label(Qty.round(rate * 7)) else Qty.approx(rate * 7) + " " + (if (Qty.approx(rate * 7) == "1") unit.singular else unit.plural)} a week")
+                    }
+                    val shopPrices = ShopCompare.byShop(entries, unit)
+                    if (shopPrices.size >= 2) {
+                        HorizontalDivider()
+                        InfoRow(
+                            "Best shop",
+                            shopPrices.first().shop,
+                            shopPrices.joinToString(" · ") { "${it.shop} ${Money.format(it.unitPriceMinor, currency)}" } + " " + unit.priceLabel,
+                        )
+                    }
+                    if (item.longLasting || Categories.isLongLasting(item.category)) {
+                        val runsOut = LongLasting.runsOutOn(entries, item.lastsDays)
+                        if (runsOut != null) {
+                            HorizontalDivider()
+                            val left = runsOut.toEpochDay() - today.toEpochDay()
+                            InfoRow("Runs out around", runsOut.format(dateFormat), if (left < 0) "Past due. Time to check it" else if (left == 0L) "Today" else "in $left days")
+                        }
+                        LongLasting.monthlyMinor(entries, item.lastsDays)?.let { monthly ->
+                            HorizontalDivider()
+                            InfoRow("Costs about", "${Money.format(monthly, currency)} a month", "Spread over how long it lasts")
+                        }
+                    }
+                    if (item.expiryDay > 0) {
+                        HorizontalDivider()
+                        val daysTo = item.expiryDay - today.toEpochDay()
+                        InfoRow("Best before", LocalDate.ofEpochDay(item.expiryDay).format(dateFormat), if (daysTo < 0) "Expired" else "in $daysTo days")
                     }
                     if (lastPriced != null) {
                         HorizontalDivider()
