@@ -17,6 +17,7 @@ struct PantryView: View {
     @State private var search = ""
     @State private var adding = false
     @State private var showSettings = false
+    @State private var showAgenda = false
     @State private var cooking = false
     @State private var showNew = false
     @State private var undo: UndoState?
@@ -70,10 +71,11 @@ struct PantryView: View {
             .alert("What's new", isPresented: $showNew) {
                 Button("Got it") { store.markWhatsNewSeen() }
             } message: {
-                Text("📦 The home page now lists what you have, with chips to filter: running low, expiring soon, long-lasting, or a category.\n\n⏳ Add a best-before date when you buy something. Turn on reminders in Settings and get a nudge 2 days before (you can change it).\n\n🗑 Expired? Tap Threw away to take it out of stock.")
+                Text("📅 New Week agenda (button on the home page): pick what you'll use each day, and see what you need to buy for the week.\n\n📦 The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
+            .sheet(isPresented: $showAgenda) { WeekAgendaView(today: today) }
             .sheet(isPresented: $cooking) {
                 CookSheet { message, action in showUndo($undo, message, action) }
             }
@@ -250,6 +252,11 @@ struct PantryView: View {
                     StatTile(value: "\(week.itemsBought)", label: "bought new").onTapGesture { tab = 2 }
                     StatTile(value: "\(toBuy)", label: "to buy").onTapGesture { tab = 1 }
                 }
+                .padding(.top, 8)
+                Button { showAgenda = true } label: {
+                    Text("📅  Week agenda").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
                 .padding(.top, 8)
                 if store.cookingOn {
                     Button { cooking = true } label: {

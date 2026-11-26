@@ -638,6 +638,12 @@ final class Store: ObservableObject {
         }
     }
 
+    /// The week agenda: epoch day to the items planned for it.
+    @Published var weekPlan: [Int: [Int64]] = WeekPlan.decode(UserDefaults.standard.string(forKey: "week_plan") ?? "") {
+        didSet { UserDefaults.standard.set(WeekPlan.encode(weekPlan), forKey: "week_plan") }
+    }
+    func planToggle(_ day: Int, _ itemId: Int64) { weekPlan = WeekPlan.toggle(weekPlan, day: day, itemId: itemId) }
+
     /// Takes everything left of an item out of stock as thrown away. Returns the event id for Undo.
     func throwAway(_ itemId: Int64) -> Int64? {
         let left = stock(itemId)

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.12.0
+- **Week agenda:** a new button on the home page. Plan the next 7 days by picking what you'll use each day. The agenda shows what you won't have enough of for the week and adds it to your shopping list in one tap ("Add all to shopping list"). It stays on your phone and isn't part of backups. Android and iPhone together.
+
 ## 1.11.0
 - **The home page now shows what you have:** an "Available" list (low stock and soon-to-expire first, then A–Z) with filter chips: All, Running low, Expiring soon, Long-lasting and your categories. Things you've run out of sit in a collapsed "Out of stock" section. Long-lasting things stay out of "All" until you pick their chip or search.
 - **Best-before dates:** add one when you buy (+3 days, +1 week, +1 month or pick a date). Items show "Best before in 3 days" and a "Use first" strip appears for anything expiring within 3 days. Expired? Tap Threw away to take it out of stock.

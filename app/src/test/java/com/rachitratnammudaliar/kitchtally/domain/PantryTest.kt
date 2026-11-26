@@ -452,4 +452,23 @@ class PantryTest {
         assertEquals("tomorrow", Expiry.label(1))
         assertEquals("in 5 days", Expiry.label(5))
     }
+
+    @Test
+    fun weekPlanRoundTripsAndToggles() {
+        val plan = WeekPlan.toggle(WeekPlan.toggle(emptyMap(), 100, 1), 100, 2)
+        assertEquals(listOf(1L, 2L), plan[100L])
+        assertEquals(plan, WeekPlan.decode(WeekPlan.encode(plan)))
+        assertTrue(WeekPlan.toggle(plan, 100, 1)[100L] == listOf(2L))
+        assertTrue(WeekPlan.toggle(WeekPlan.toggle(emptyMap(), 5, 9), 5, 9).isEmpty())
+        assertTrue(WeekPlan.decode("garbage;1:").isEmpty())
+    }
+
+    @Test
+    fun weekPlanShortfallCountsPlannedDays() {
+        val plan = mapOf(10L to listOf(1L), 11L to listOf(1L), 12L to listOf(1L, 2L))
+        assertEquals(3, WeekPlan.times(plan, 1))
+        assertEquals(2.0, WeekPlan.shortBy(plan, 1, 1.0, 1.0), 0.0001)
+        assertEquals(0.0, WeekPlan.shortBy(plan, 1, 1.0, 5.0), 0.0001)
+        assertEquals(setOf(11L, 12L), WeekPlan.upcoming(plan, 11).keys)
+    }
 }

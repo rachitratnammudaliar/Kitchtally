@@ -411,4 +411,21 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(Expiry.label(1), "tomorrow")
         XCTAssertEqual(Expiry.label(5), "in 5 days")
     }
+
+    func testWeekPlanRoundTripsAndToggles() {
+        let plan = WeekPlan.toggle(WeekPlan.toggle([:], day: 100, itemId: 1), day: 100, itemId: 2)
+        XCTAssertEqual(plan[100], [1, 2])
+        XCTAssertEqual(WeekPlan.decode(WeekPlan.encode(plan)), plan)
+        XCTAssertEqual(WeekPlan.toggle(plan, day: 100, itemId: 1)[100], [2])
+        XCTAssertTrue(WeekPlan.toggle(WeekPlan.toggle([:], day: 5, itemId: 9), day: 5, itemId: 9).isEmpty)
+        XCTAssertTrue(WeekPlan.decode("garbage;1:").isEmpty)
+    }
+
+    func testWeekPlanShortfallCountsPlannedDays() {
+        let plan: [Int: [Int64]] = [10: [1], 11: [1], 12: [1, 2]]
+        XCTAssertEqual(WeekPlan.times(plan, 1), 3)
+        XCTAssertEqual(WeekPlan.shortBy(plan, 1, step: 1, stock: 1), 2, accuracy: 0.0001)
+        XCTAssertEqual(WeekPlan.shortBy(plan, 1, step: 1, stock: 5), 0, accuracy: 0.0001)
+        XCTAssertEqual(Set(WeekPlan.upcoming(plan, today: 11).keys), [11, 12])
+    }
 }

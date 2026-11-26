@@ -874,3 +874,44 @@ enum Expiry {
         return "in \(left) days"
     }
 }
+
+/// The week agenda: which pantry items you plan to use on which day (epoch day). Kept on the phone only.
+enum WeekPlan {
+    static func encode(_ plan: [Int: [Int64]]) -> String {
+        plan.filter { !$0.value.isEmpty }.sorted { $0.key < $1.key }
+            .map { "\($0.key):" + $0.value.map(String.init).joined(separator: ",") }.joined(separator: ";")
+    }
+
+    static func decode(_ text: String) -> [Int: [Int64]] {
+        var out: [Int: [Int64]] = [:]
+        for part in text.split(separator: ";") {
+            let bits = part.split(separator: ":", maxSplits: 1)
+            guard bits.count == 2, let day = Int(bits[0]) else { continue }
+            var ids: [Int64] = []
+            for s in bits[1].split(separator: ",") { if let id = Int64(s), !ids.contains(id) { ids.append(id) } }
+            if !ids.isEmpty { out[day] = ids }
+        }
+        return out
+    }
+
+    /// Adds the item to the day, or takes it off if it's already there.
+    static func toggle(_ plan: [Int: [Int64]], day: Int, itemId: Int64) -> [Int: [Int64]] {
+        var next = plan
+        var now = next[day] ?? []
+        if let i = now.firstIndex(of: itemId) { now.remove(at: i) } else { now.append(itemId) }
+        next[day] = now.isEmpty ? nil : now
+        return next
+    }
+
+    /// Only today and later.
+    static func upcoming(_ plan: [Int: [Int64]], today: Int) -> [Int: [Int64]] { plan.filter { $0.key >= today } }
+
+    /// How many days the item is planned for.
+    static func times(_ plan: [Int: [Int64]], _ itemId: Int64) -> Int { plan.values.filter { $0.contains(itemId) }.count }
+
+    /// How much more you need than you have: planned days × one use each, minus what's in stock.
+    static func shortBy(_ plan: [Int: [Int64]], _ itemId: Int64, step: Double, stock: Double) -> Double {
+        let need = Double(times(plan, itemId)) * max(step, 0.001) - stock
+        return max(0, (need * 1000).rounded() / 1000)
+    }
+}
