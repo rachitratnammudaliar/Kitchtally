@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 import UIKit
 
 struct Item: Identifiable, Equatable {
@@ -98,10 +99,12 @@ struct Event: Identifiable, Equatable {
     var countsFromDay: Int? = nil
     /// Bought on a craving: an avoidable expense.
     var craving: Bool = false
+    /// For a purchase: best-before day. 0 = none.
+    var expiryDay: Int = 0
 
     var typeValue: EventType { EventType.from(type) }
     var date: Day { Day(epochDay: epochDay) }
-    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFrom: countsFromDay.map { Day(epochDay: $0) }, craving: craving) }
+    var entry: Entry { Entry(type: typeValue, date: date, quantity: quantity, priceMinor: priceMinor, shop: shop, countsFrom: countsFromDay.map { Day(epochDay: $0) }, craving: craving, expiry: expiryDay > 0 ? Day(epochDay: expiryDay) : nil) }
 }
 
 /// The same JSON format as the Android app's backups. The app's own data file also keeps photo names.
@@ -132,6 +135,7 @@ enum Backup {
                 "priceMinor": e.priceMinor.map { $0 as Any } ?? NSNull(), "shop": e.shop, "note": e.note, "createdAt": e.createdAt,
                 "countsFromDay": e.countsFromDay.map { $0 as Any } ?? NSNull(), "craving": e.craving,
             ]
+            if e.type == EventType.BOUGHT.rawValue && e.expiryDay > 0 { o["expiryDay"] = e.expiryDay }
             if includePhotos { o["receiptFile"] = e.receiptFile }
             return o
         }
@@ -213,7 +217,8 @@ enum Backup {
                 note: String(string(o, "note").prefix(200)),
                 createdAt: number(o, "createdAt")?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000),
                 countsFromDay: type == .BOUGHT ? number(o, "countsFromDay")?.intValue : nil,
-                craving: type == .BOUGHT && ((o["craving"] as? Bool) ?? false)
+                craving: type == .BOUGHT && ((o["craving"] as? Bool) ?? false),
+                expiryDay: type == .BOUGHT ? max(0, number(o, "expiryDay")?.intValue ?? 0) : 0
             ))
         }
         var notes: [ShoppingNote] = []
@@ -480,6 +485,7 @@ final class Store: ObservableObject {
         } catch {
             problem = "Couldn't save: \(error.localizedDescription)"
         }
+        rescheduleExpiry()
     }
 
     @discardableResult
@@ -586,6 +592,61 @@ final class Store: ObservableObject {
     func isLong(_ id: Int64) -> Bool { item(id).map { $0.longLasting || Categories.isLongLasting($0.category) } ?? false }
 
     /// Recipes, the meal planner and "Cook a meal". Off unless switched on in Settings.
+    /// Best-before reminders: local notifications only, nothing is sent anywhere.
+    @Published var expiryOn: Bool = UserDefaults.standard.bool(forKey: "expiry_on") {
+        didSet {
+            UserDefaults.standard.set(expiryOn, forKey: "expiry_on")
+            if expiryOn { UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in } }
+            rescheduleExpiry()
+        }
+    }
+    @Published var expiryDays: Int = (UserDefaults.standard.object(forKey: "expiry_days") as? Int) ?? 2 {
+        didSet {
+            UserDefaults.standard.set(expiryDays, forKey: "expiry_days")
+            rescheduleExpiry()
+        }
+    }
+
+    /// One notification per item at 9:00, `expiryDays` before its best-before date.
+    func rescheduleExpiry() {
+        let center = UNUserNotificationCenter.current()
+        let on = expiryOn, before = expiryDays
+        let today = Day.today()
+        var plans: [(String, String, Date)] = []
+        if on {
+            for item in items {
+                let st = stock(item.id)
+                guard st > 0, let e = Expiry.of(entries(item.id), stock: st, itemExpiryDay: item.expiryDay) else { continue }
+                let fire = Day(epochDay: e.epochDay - before)
+                guard fire.epochDay >= today.epochDay,
+                      let at = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: fire.localDate), at > Date() else { continue }
+                let left = before
+                plans.append(("expiry-\(item.id)", "\(item.name) — best before " + Expiry.label(left), at))
+            }
+        }
+        center.getPendingNotificationRequests { pending in
+            let old = pending.map(\.identifier).filter { $0.hasPrefix("expiry-") }
+            center.removePendingNotificationRequests(withIdentifiers: old)
+            for (id, body, at) in plans {
+                let content = UNMutableNotificationContent()
+                content.title = "Use it soon"
+                content.body = body
+                content.sound = .default
+                let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: at)
+                center.add(UNNotificationRequest(identifier: id, content: content, trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)))
+            }
+        }
+    }
+
+    /// Takes everything left of an item out of stock as thrown away. Returns the event id for Undo.
+    func throwAway(_ itemId: Int64) -> Int64? {
+        let left = stock(itemId)
+        guard left > 0 else { return nil }
+        appendEvent(Event(itemId: itemId, type: EventType.USED.rawValue, epochDay: Day.today().epochDay, quantity: left, note: "Threw away"))
+        persist()
+        return nextEventId - 1
+    }
+
     @Published var cookingOn: Bool = UserDefaults.standard.bool(forKey: "cooking_on") {
         didSet { UserDefaults.standard.set(cookingOn, forKey: "cooking_on") }
     }

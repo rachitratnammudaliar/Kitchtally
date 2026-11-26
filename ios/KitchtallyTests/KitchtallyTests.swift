@@ -385,4 +385,30 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(Suggestions.forName("Vitamin D3 Pills")?.category, "Health")
         XCTAssertEqual(Suggestions.forName("French Fries")?.category, "Frozen")
     }
+
+    func testExpiryTakesTheEarliestDateStillInStock() {
+        let old = Entry(type: .BOUGHT, date: d(10), quantity: 1, expiry: d(-2))
+        let new = Entry(type: .BOUGHT, date: d(1), quantity: 1, expiry: d(-20))
+        XCTAssertEqual(Expiry.next([old, new], stock: 1), d(-20))
+        XCTAssertEqual(Expiry.next([old, new], stock: 2), d(-2))
+        XCTAssertNil(Expiry.next([old, new], stock: 0))
+        let plain = Entry(type: .BOUGHT, date: d(1), quantity: 1)
+        XCTAssertNil(Expiry.next([old, plain], stock: 1))
+        XCTAssertEqual(Expiry.next([old, plain], stock: 2), d(-2))
+    }
+
+    func testExpiryOfItemUsesWhicheverComesFirst() {
+        let e = Entry(type: .BOUGHT, date: d(3), quantity: 1, expiry: d(-5))
+        XCTAssertEqual(Expiry.of([e], stock: 1, itemExpiryDay: d(-9).epochDay), d(-5))
+        XCTAssertEqual(Expiry.of([e], stock: 1, itemExpiryDay: d(-2).epochDay), d(-2))
+        XCTAssertNil(Expiry.of([], stock: 0, itemExpiryDay: 0))
+    }
+
+    func testExpiryLabels() {
+        XCTAssertEqual(Expiry.label(-3), "3 days ago")
+        XCTAssertEqual(Expiry.label(-1), "1 day ago")
+        XCTAssertEqual(Expiry.label(0), "today")
+        XCTAssertEqual(Expiry.label(1), "tomorrow")
+        XCTAssertEqual(Expiry.label(5), "in 5 days")
+    }
 }

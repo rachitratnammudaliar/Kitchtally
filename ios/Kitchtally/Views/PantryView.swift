@@ -1,19 +1,10 @@
 import SwiftUI
 
-/// The special groups on the home page, next to the categories.
-enum HomeGroup {
-    static let long = "🪥  Long-lasting"
-    static let unsure = "🤔  Not sure to buy again"
-    static let noRebuy = "🚫  No need to buy again"
-}
-
-private struct HomeTile: Identifiable {
-    let key: String
-    let emoji: String
-    let title: String
-    let count: Int
-    let need: Int
-    var id: String { key }
+/// Filter chips on the home page. Anything else is a category name.
+enum HomeChip {
+    static let low = "@low"
+    static let expiring = "@expiring"
+    static let long = "@long"
 }
 
 struct PantryView: View {
@@ -22,6 +13,7 @@ struct PantryView: View {
     @Binding var tab: Int
 
     @State private var filter = ""
+    @State private var showOut = false
     @State private var search = ""
     @State private var adding = false
     @State private var showSettings = false
@@ -60,55 +52,7 @@ struct PantryView: View {
                             }
                         }
                     }
-                    let categories = Categories.ordered(store.usedCategories)
-                    let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-                    let shown = store.items.filter {
-                        query.isEmpty || $0.name.lowercased().contains(query) || $0.notes.lowercased().contains(query)
-                    }
-                    let longItems = shown.filter { store.isLong($0.id) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
-                    if filter.isEmpty && query.isEmpty {
-                        homeTiles(categories: categories, longItems: longItems)
-                    }
-                    if !filter.isEmpty {
-                        Section { Button("← All categories") { filter = "" } }
-                    }
-                    if shown.isEmpty {
-                        Text("Nothing matches \"\(search)\"").foregroundColor(.secondary)
-                    }
-                    if filter == HomeGroup.long {
-                        Section(header: Text("\(HomeGroup.long) · \(longItems.count)")) {
-                            ForEach(longItems) { item in
-                                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
-                            }
-                        }
-                    }
-                    ForEach(categories.filter { filter.isEmpty || $0.lowercased() == filter.lowercased() }, id: \.self) { category in
-                        let rows = shown.filter { !$0.unsure && !$0.noRebuy && $0.category.lowercased() == category.lowercased() }
-                            .sorted { $0.name.lowercased() < $1.name.lowercased() }
-                        if !rows.isEmpty {
-                            Section(header: Text("\(Categories.emojiFor(category))  \(category) · \(rows.count)")) {
-                                ForEach(rows) { item in
-                                    ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
-                                }
-                            }
-                        }
-                    }
-                    let noRebuy = shown.filter { $0.noRebuy && (filter.isEmpty || filter == HomeGroup.noRebuy) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
-                    if !noRebuy.isEmpty {
-                        Section(header: Text("🚫  No need to buy again · \(noRebuy.count)")) {
-                            ForEach(noRebuy) { item in
-                                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
-                            }
-                        }
-                    }
-                    let unsure = shown.filter { $0.unsure && (filter.isEmpty || filter == HomeGroup.unsure) }.sorted { $0.name.lowercased() < $1.name.lowercased() }
-                    if !unsure.isEmpty {
-                        Section(header: Text("🤔  Not sure to buy again · \(unsure.count)")) {
-                            ForEach(unsure) { item in
-                                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
-                            }
-                        }
-                    }
+                    availableContent
                 }
             }
             .searchable(text: $search, prompt: "Search your pantry")
@@ -126,7 +70,7 @@ struct PantryView: View {
             .alert("What's new", isPresented: $showNew) {
                 Button("Got it") { store.markWhatsNewSeen() }
             } message: {
-                Text("🧩 A new home page: tap a category tile. A strip at the top shows what needs buying.\n\n🪥 Long-lasting things (toothpaste, vitamins) stay off your weekly bill. Mark any item, and see when it runs low.\n\n🏪 Each item shows its best shop. New shops: Depo and Silas.\n\n🍲 Recipes and Cook a meal are now optional: Settings → Features.")
+                Text("📦 The home page now lists what you have, with chips to filter: running low, expiring soon, long-lasting, or a category.\n\n⏳ Add a best-before date when you buy something. Turn on reminders in Settings and get a nudge 2 days before (you can change it).\n\n🗑 Expired? Tap Threw away to take it out of stock.")
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
@@ -137,13 +81,111 @@ struct PantryView: View {
         }
     }
 
+    private func expiryOf(_ item: Item) -> Day? {
+        Expiry.of(store.entries(item.id), stock: store.stock(item.id), itemExpiryDay: item.expiryDay)
+    }
+
+    private func sortKey(_ item: Item) -> (Int, Int, String) {
+        let name = item.name.lowercased()
+        if store.stock(item.id) > 0 && store.status(item, today) != .ok { return (0, 0, name) }
+        if let e = expiryOf(item), e.epochDay - today.epochDay <= 7 { return (1, e.epochDay, name) }
+        return (2, 0, name)
+    }
+
+    private func chip(_ key: String, _ title: String) -> some View {
+        Button { filter = key } label: {
+            Text(title).font(.subheadline)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(filter == key ? Color(rgb: 0x2E6B3A) : Color.secondary.opacity(0.15)))
+                .foregroundColor(filter == key ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
-    private func homeTiles(categories: [String], longItems: [Item]) -> some View {
+    private var availableContent: some View {
+        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
+        let searching = !query.isEmpty
+        let shown = store.items.filter {
+            !searching || $0.name.lowercased().contains(query) || $0.notes.lowercased().contains(query)
+        }
+        let categories = Categories.ordered(store.usedCategories)
+        let hasLong = store.items.contains { store.isLong($0.id) }
+        if !searching {
+            Section {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        chip("", "All")
+                        chip(HomeChip.low, "⚠️ Running low")
+                        chip(HomeChip.expiring, "⏳ Expiring soon")
+                        if hasLong { chip(HomeChip.long, "🪥 Long-lasting") }
+                        ForEach(categories, id: \.self) { c in chip(c, "\(Categories.emojiFor(c)) \(c)") }
+                    }
+                    .padding(.horizontal, 12)
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+            }
+        }
+        if filter.isEmpty && !searching { stripSections }
+
+        let inStock = shown.filter { store.stock($0.id) > 0 }
+        let matching: [Item] = {
+            if searching { return inStock }
+            switch filter {
+            case "": return inStock.filter { !store.isLong($0.id) }
+            case HomeChip.low: return inStock.filter { store.status($0, today) != .ok }
+            case HomeChip.expiring: return inStock.filter { (expiryOf($0)?.epochDay ?? Int.max) - today.epochDay <= 14 }
+            case HomeChip.long: return inStock.filter { store.isLong($0.id) }
+            default: return inStock.filter { $0.category.lowercased() == filter.lowercased() }
+            }
+        }()
+        let list = matching.sorted { a, b in
+            let x = sortKey(a), y = sortKey(b)
+            if x.0 != y.0 { return x.0 < y.0 }
+            if x.1 != y.1 { return x.1 < y.1 }
+            return x.2 < y.2
+        }
+        let outOfStock: [Item] = {
+            if filter == HomeChip.low || filter == HomeChip.expiring { return [] }
+            return shown.filter { store.stock($0.id) <= 0 && (searching || filter.isEmpty || (filter == HomeChip.long ? store.isLong($0.id) : $0.category.lowercased() == filter.lowercased())) }
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        }()
+        Section(header: Text("Available · \(list.count)")) {
+            if list.isEmpty {
+                Text(searching ? "Nothing matches \"\(search)\"" : "Nothing here right now").foregroundColor(.secondary)
+            }
+            ForEach(list) { item in
+                ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
+            }
+        }
+        if !outOfStock.isEmpty {
+            Section {
+                Button { showOut.toggle() } label: {
+                    HStack {
+                        Text("Out of stock · \(outOfStock.count)").foregroundColor(.primary)
+                        Spacer()
+                        Image(systemName: showOut ? "chevron.up" : "chevron.down").foregroundColor(.secondary)
+                    }
+                }
+                if showOut {
+                    ForEach(outOfStock) { item in
+                        ItemRow(item: item, today: today, undo: $undo) { path.append(item.id) }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stripSections: some View {
         let needs = store.items.filter { store.onShoppingList($0, today) }
         let lowLong = store.items.filter {
             store.isLong($0.id) && !$0.noRebuy && !store.onShoppingList($0, today) && LongLasting.runningLow(store.entries($0.id), lastsDays: $0.lastsDays, today: today)
         }
-        let expiring = store.items.filter { $0.expiryDay > 0 && $0.expiryDay - today.epochDay <= 14 }
+        let useFirst = store.items.filter { item in
+            store.stock(item.id) > 0 && (expiryOf(item).map { $0.epochDay - today.epochDay <= 3 } ?? false)
+        }.sorted { (expiryOf($0)?.epochDay ?? 0) < (expiryOf($1)?.epochDay ?? 0) }
         if !needs.isEmpty {
             Section {
                 Button { tab = 1 } label: {
@@ -156,7 +198,28 @@ struct PantryView: View {
                 .buttonStyle(.plain)
             }
         }
-        if !lowLong.isEmpty || !expiring.isEmpty {
+        if !useFirst.isEmpty {
+            Section(header: Text("⏳  Use first")) {
+                ForEach(Array(useFirst.prefix(5))) { item in
+                    let d = (expiryOf(item)?.epochDay ?? today.epochDay) - today.epochDay
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.name)
+                            Text("Best before " + Expiry.label(d)).font(.caption).foregroundColor(d < 0 ? .red : .orange)
+                        }
+                        Spacer()
+                        if d < 0 {
+                            Button("Threw away") {
+                                if let r = store.throwAway(item.id) {
+                                    showUndo($undo, "Threw away \(item.name)") { store.deleteEvent(r) }
+                                }
+                            }.buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+        }
+        if !lowLong.isEmpty {
             Section(header: Text("🪥  Long-lasting, coming up")) {
                 ForEach(Array(lowLong.prefix(4))) { item in
                     let left = (LongLasting.runsOutOn(store.entries(item.id), lastsDays: item.lastsDays)?.epochDay ?? today.epochDay) - today.epochDay
@@ -169,39 +232,7 @@ struct PantryView: View {
                         Button("Add to shop") { store.setRefillNeeded(item.id, true) }.buttonStyle(.borderless)
                     }
                 }
-                ForEach(Array(expiring.prefix(3))) { item in
-                    let d = item.expiryDay - today.epochDay
-                    Text("⏳  \(item.name): " + (d < 0 ? "past its best-before date" : "best before in \(d) days")).font(.caption).foregroundColor(.secondary)
-                }
             }
-        }
-        let tiles: [HomeTile] = categories.map { c in
-            let inCat = store.items.filter { !$0.unsure && !$0.noRebuy && $0.category.lowercased() == c.lowercased() }
-            return HomeTile(key: c, emoji: Categories.emojiFor(c), title: c, count: inCat.count, need: inCat.filter { store.onShoppingList($0, today) }.count)
-        } + [
-            longItems.isEmpty ? nil : HomeTile(key: HomeGroup.long, emoji: "🪥", title: "Long-lasting", count: longItems.count, need: longItems.filter { store.onShoppingList($0, today) }.count),
-            store.items.filter { $0.unsure }.isEmpty ? nil : HomeTile(key: HomeGroup.unsure, emoji: "🤔", title: "Not sure to buy again", count: store.items.filter { $0.unsure }.count, need: 0),
-            store.items.filter { $0.noRebuy }.isEmpty ? nil : HomeTile(key: HomeGroup.noRebuy, emoji: "🚫", title: "No need to buy again", count: store.items.filter { $0.noRebuy }.count, need: 0),
-        ].compactMap { $0 }
-        Section {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                ForEach(tiles) { tile in
-                    Button { filter = tile.key } label: {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(tile.emoji).font(.largeTitle)
-                            Text(tile.title).font(.subheadline.weight(.semibold)).foregroundColor(.primary).lineLimit(2)
-                            Text("\(tile.count) item\(tile.count == 1 ? "" : "s")" + (tile.need > 0 ? " · \(tile.need) to buy" : ""))
-                                .font(.caption).foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(RoundedRectangle(cornerRadius: 16).fill(tile.need > 0 ? Color(rgb: 0x2E6B3A).opacity(0.18) : Color.secondary.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
-            .listRowBackground(Color.clear)
         }
     }
 
@@ -259,6 +290,11 @@ struct ItemRow: View {
                     Text(detailLine(item, store, today)).font(.caption)
                         .fontWeight(alert ? .medium : .regular)
                         .foregroundColor(alert ? statusColor(status) : .secondary).lineLimit(2)
+                    if stock > 0, let e = Expiry.of(store.entries(item.id), stock: stock, itemExpiryDay: item.expiryDay), e.epochDay - today.epochDay <= 14 {
+                        let d = e.epochDay - today.epochDay
+                        Text("⏳ Best before " + Expiry.label(d)).font(.caption)
+                            .foregroundColor(d < 0 ? .red : d <= 3 ? .orange : .secondary)
+                    }
                 }
                 Spacer(minLength: 4)
             }

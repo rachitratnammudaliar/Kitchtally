@@ -171,6 +171,8 @@ struct Entry {
     var countsFrom: Day? = nil
     /// Bought on a craving: an avoidable expense.
     var craving: Bool = false
+    /// Best-before date of a purchase.
+    var expiry: Day? = nil
 
     /// The day this entry counts on the Weekly tab: purchases may be moved to next week.
     var weekDate: Day { type == .BOUGHT ? (countsFrom ?? date) : date }
@@ -833,5 +835,42 @@ enum Recipes {
         f.dateFormat = "EEE d"
         f.timeZone = TimeZone(identifier: "UTC")
         return f.string(from: Day(epochDay: plannedDay).date)
+    }
+}
+
+
+/// Best-before dates: what is in the cupboard goes off first-bought-first.
+enum Expiry {
+    /// The earliest best-before date among the purchases still making up the stock (newest purchases first).
+    static func next(_ entries: [Entry], stock: Double) -> Day? {
+        guard stock > 0 else { return nil }
+        var covered = 0.0
+        var best: Day? = nil
+        for e in entries.filter({ $0.type == .BOUGHT }).sorted(by: { $0.date > $1.date }) {
+            if let x = e.expiry, best == nil || x < best! { best = x }
+            covered += e.quantity
+            if covered >= stock { break }
+        }
+        return best
+    }
+
+    /// The earlier of the purchase date and a date set on the item itself.
+    static func of(_ entries: [Entry], stock: Double, itemExpiryDay: Int) -> Day? {
+        let fromBuys = next(entries, stock: stock)
+        let fromItem: Day? = itemExpiryDay > 0 ? Day(epochDay: itemExpiryDay) : nil
+        switch (fromBuys, fromItem) {
+        case let (a?, b?): return a < b ? a : b
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        default: return nil
+        }
+    }
+
+    static func label(_ left: Int) -> String {
+        if left < -1 { return "\(-left) days ago" }
+        if left == -1 { return "1 day ago" }
+        if left == 0 { return "today" }
+        if left == 1 { return "tomorrow" }
+        return "in \(left) days"
     }
 }

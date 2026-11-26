@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.0
+- **The home page now shows what you have:** an "Available" list (low stock and soon-to-expire first, then A–Z) with filter chips: All, Running low, Expiring soon, Long-lasting and your categories. Things you've run out of sit in a collapsed "Out of stock" section. Long-lasting things stay out of "All" until you pick their chip or search.
+- **Best-before dates:** add one when you buy (+3 days, +1 week, +1 month or pick a date). Items show "Best before in 3 days" and a "Use first" strip appears for anything expiring within 3 days. Expired? Tap Threw away to take it out of stock.
+- **Reminders:** Settings → Reminders sends a notification at 9:00, 2 days before (or 0–7 days, your choice). It stays on your phone; the app still has no internet access.
+- Database moves to version 10; your data and backups carry over. Android and iPhone together.
+
 ## 1.10.2
 - The full list is back under the category tiles on the home page: scroll down to see every item, grouped by category, like before. Tap a tile to jump to just that category.
 

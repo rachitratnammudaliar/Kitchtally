@@ -10,6 +10,7 @@ struct KitchtallyApp: App {
             RootView()
                 .environmentObject(store)
                 .tint(Color(rgb: 0x2E6B3A))
+                .onAppear { store.rescheduleExpiry() }
         }
     }
 }

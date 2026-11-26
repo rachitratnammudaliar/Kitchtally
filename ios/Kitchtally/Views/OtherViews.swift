@@ -554,6 +554,19 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Best-before reminders", isOn: $store.expiryOn)
+                    if store.expiryOn {
+                        Picker("Remind me", selection: $store.expiryDays) {
+                            ForEach([0, 1, 2, 3, 5, 7], id: \.self) { Text($0 == 0 ? "On the day" : $0 == 1 ? "1 day before" : "\($0) days before").tag($0) }
+                        }
+                    }
+                } header: {
+                    Text("Reminders")
+                } footer: {
+                    Text("A notification at 9:00 for things with a best-before date. It stays on this phone; nothing is sent anywhere.")
+                }
+
+                Section {
                     Toggle("Cooking features", isOn: $store.cookingOn)
                     Button("Tidy categories") {
                         let n = store.tidyCategories()

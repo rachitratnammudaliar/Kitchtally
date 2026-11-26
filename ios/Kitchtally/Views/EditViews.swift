@@ -318,6 +318,8 @@ struct PurchaseView: View {
     @State private var date = Date()
     @State private var nextWeek = false
     @State private var craving = false
+    @State private var hasExpiry = false
+    @State private var expiryDate = Date()
     @State private var perUnit = false
     @State private var priceText = ""
     @State private var shop = ""
@@ -357,6 +359,7 @@ struct PurchaseView: View {
             date = e.date.localDate
             nextWeek = e.countsFromDay != nil
             craving = e.craving
+            if e.expiryDay > 0 { hasExpiry = true; expiryDate = Day(epochDay: e.expiryDay).localDate }
             priceText = e.priceMinor.map { Money.minorToInput($0) } ?? ""
             shop = e.shop
             receipt = e.receiptFile
@@ -399,7 +402,8 @@ struct PurchaseView: View {
             note: note.trimmingCharacters(in: .whitespaces),
             createdAt: existing?.createdAt ?? Int64(Date().timeIntervalSince1970 * 1000),
             countsFromDay: nextWeek ? Pantry.weekStart(Day(localDate: date), first: store.weekStartDay).plusDays(7).epochDay : nil,
-            craving: craving
+            craving: craving,
+            expiryDay: hasExpiry ? Day(localDate: expiryDate).epochDay : 0
         ))
         dismiss()
     }
@@ -469,6 +473,27 @@ struct PurchaseView: View {
                     } footer: {
                         Text(guess.map { "Leave it empty to keep about \(Qty.approx($0))." } ?? "Look at what you bought and guess. You can change it any time.")
                     }
+                }
+
+                Section {
+                    if hasExpiry {
+                        DatePicker("Best before", selection: $expiryDate, displayedComponents: .date)
+                        Button("Clear date", role: .destructive) { hasExpiry = false }
+                    } else {
+                        HStack(spacing: 8) {
+                            ForEach([("+3 days", 3), ("+1 week", 7), ("+1 month", 30)], id: \.1) { label, days in
+                                Button(label) {
+                                    expiryDate = Calendar.current.date(byAdding: .day, value: days, to: date) ?? date
+                                    hasExpiry = true
+                                }.buttonStyle(.borderless)
+                            }
+                        }
+                        Button("Pick a date") { expiryDate = date; hasExpiry = true }
+                    }
+                } header: {
+                    Text("Best before (optional)")
+                } footer: {
+                    Text("Turn on reminders in Settings to be told before it goes off.")
                 }
 
                 Section("Shop") {
