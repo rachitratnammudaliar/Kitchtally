@@ -300,6 +300,7 @@ fun KitchtallyRoot(
             onDone = { route = back.ifEmpty { "item:$id1" } },
         )
         "settings" -> SettingsScreen(vm = vm, currency = currency, onBack = { route = tab })
+        "agenda" -> WeekAgendaScreen(vm = vm, state = state, today = today, onBack = { route = tab })
         "recipe" -> EditRecipeScreen(vm = vm, state = state, id = id1, today = today, onDone = { route = tab })
         else -> MainTabs(
             vm = vm, state = state, tabIn = tab, today = today, currency = currency,
@@ -308,6 +309,7 @@ fun KitchtallyRoot(
             onAdd = { route = "edit:0" },
             onBuy = { back = tab; route = "buy:$it:0" },
             onSettings = { route = "settings" },
+            onAgenda = { route = "agenda" },
             onEditRecipe = { route = "recipe:$it" },
             openCook = openCook,
             openAdjust = openAdjust,
@@ -329,6 +331,7 @@ private fun MainTabs(
     onAdd: () -> Unit,
     onBuy: (Long) -> Unit,
     onSettings: () -> Unit,
+    onAgenda: () -> Unit = {},
     onEditRecipe: (Long) -> Unit = {},
     openCook: Boolean = false,
     openAdjust: Long = 0L,
@@ -428,7 +431,7 @@ private fun MainTabs(
             "shopping" -> ShoppingList(vm, s, today, currency, snackbar, tickedNow, { id -> onTicked(if (id in ticked) ticked - id else ticked + id) }, onOpen, onBuy, modifier)
             "week" -> WeekSummary(vm, s, today, currency, onOpen, modifier)
             "recipes" -> RecipesScreen(vm, s, today, currency, snackbar, onEditRecipe, modifier)
-            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, onSettings, modifier, openAdjust, cookingOn)
+            else -> PantryList(vm, s, today, snackbar, onOpen, onAdd, onTab, { cooking = true }, onSettings, onAgenda, modifier, openAdjust, cookingOn)
         }
     }
 }
@@ -446,6 +449,7 @@ private fun PantryList(
     onTab: (String) -> Unit,
     onCook: () -> Unit,
     onSettings: () -> Unit,
+    onAgenda: () -> Unit,
     modifier: Modifier,
     openAdjust: Long = 0L,
     cookingOn: Boolean = false,
@@ -461,9 +465,8 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("📋  The home page now lists what you have, with filter chips: Running low, Expiring soon, Long-lasting and your categories.")
-                    Text("⏳  Add a best-before date when you log a purchase. A strip shows what to use first, and Settings can remind you 2 days before.")
-                    Text("🗑️  Expired? Tap Threw away to take it out of stock.")
+                    Text("📅  New Week agenda (button on the home page): pick what you'll use each day, and see what you need to buy for the week.")
+                    Text("📋  The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
                 }
             },
             confirmButton = { TextButton(onClick = { showNew = false; vm.markWhatsNewSeen() }) { Text("Got it") } },
@@ -606,8 +609,10 @@ private fun PantryList(
                         StatTile(week.itemsBought.toString(), "bought new", Modifier.weight(1f)) { onTab("week") }
                         StatTile((toBuy + state.notes.size).toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = onAgenda, modifier = Modifier.fillMaxWidth()) { Text("📅  Week agenda") }
                     if (cookingOn) {
-                        Spacer(Modifier.height(12.dp))
+                        Spacer(Modifier.height(8.dp))
                         Button(onClick = onCook, modifier = Modifier.fillMaxWidth()) { Text("🍳  Cook a meal") }
                     }
                 }

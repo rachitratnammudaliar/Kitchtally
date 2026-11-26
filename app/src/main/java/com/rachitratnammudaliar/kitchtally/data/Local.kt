@@ -177,6 +177,11 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("cooking_on", false)
         set(value) = prefs.edit().putBoolean("cooking_on", value).apply()
 
+    /** The week agenda, e.g. "20600:3,5;20601:2". See WeekPlan. */
+    var weekPlan: String
+        get() = prefs.getString("week_plan", "") ?: ""
+        set(value) = prefs.edit().putString("week_plan", value).apply()
+
     /** A notification before something expires. Off until you turn it on (it asks for permission). */
     var expiryReminders: Boolean
         get() = prefs.getBoolean("expiry_reminders", false)

@@ -23,6 +23,7 @@ import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
+import com.rachitratnammudaliar.kitchtally.domain.WeekPlan
 import com.rachitratnammudaliar.kitchtally.reminders.ExpiryReminders
 import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
@@ -83,6 +84,21 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     fun setCookingOn(on: Boolean) {
         prefs.cookingOn = on
         _cookingOn.value = on
+    }
+
+    private val _weekPlan = MutableStateFlow(WeekPlan.decode(prefs.weekPlan))
+    /** The week agenda: epoch day to the items planned for it. */
+    val weekPlan: StateFlow<Map<Long, List<Long>>> = _weekPlan.asStateFlow()
+
+    fun planToggle(day: Long, itemId: Long) {
+        val next = WeekPlan.toggle(_weekPlan.value, day, itemId)
+        prefs.weekPlan = WeekPlan.encode(next)
+        _weekPlan.value = next
+    }
+
+    fun planClear() {
+        prefs.weekPlan = ""
+        _weekPlan.value = emptyMap()
     }
 
     private val _hiddenShops = MutableStateFlow(prefs.hiddenShops)
