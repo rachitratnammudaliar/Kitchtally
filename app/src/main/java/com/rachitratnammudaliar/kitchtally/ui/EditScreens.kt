@@ -26,6 +26,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -491,6 +492,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
     var originalReceipt by rememberSaveable { mutableStateOf("") }
     var note by rememberSaveable { mutableStateOf("") }
     var craving by rememberSaveable { mutableStateOf(false) }
+    var expiryDay by rememberSaveable { mutableStateOf(0L) }
     var mealsText by rememberSaveable { mutableStateOf("") }
     var showErrors by rememberSaveable { mutableStateOf(false) }
 
@@ -507,6 +509,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
             originalReceipt = existing.receiptFile
             note = existing.note
             craving = existing.craving
+            expiryDay = existing.expiryDay
         } else {
             nextWeek = forNextUntil > today.toEpochDay()
             // Pre-fill with last time's unit price and shop.
@@ -566,6 +569,7 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 receiptFile = receipt,
                 note = note.trim(),
                 craving = craving,
+                expiryDay = expiryDay,
                 createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 countsFromDay = if (nextWeek) Pantry.weekStart(LocalDate.ofEpochDay(day), DayOfWeek.of(weekFirst)).plusWeeks(1).toEpochDay() else null,
             ),
@@ -688,6 +692,19 @@ fun PurchaseScreen(vm: PantryViewModel, state: PantryState?, itemId: Long, event
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            val expiryContext = LocalContext.current
+            Text("Best before (optional)", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf("+3 days" to 3L, "+1 week" to 7L, "+1 month" to 30L).forEach { (label, add) ->
+                    FilterChip(selected = false, onClick = { expiryDay = LocalDate.ofEpochDay(day).plusDays(add).toEpochDay() }, label = { Text(label) })
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = {
+                    pickDate(expiryContext, if (expiryDay > 0) LocalDate.ofEpochDay(expiryDay) else LocalDate.ofEpochDay(day).plusDays(7)) { expiryDay = it.toEpochDay() }
+                }) { Text(if (expiryDay > 0) "Best before ${LocalDate.ofEpochDay(expiryDay)}" else "Pick a date") }
+                if (expiryDay > 0) TextButton(onClick = { expiryDay = 0L }) { Text("Clear") }
+            }
             SwitchRow("Bought on a craving", "Not needed, just wanted it. Counted as money wasted on Weekly.", craving) { craving = it }
             Text(
                 "Saving adds ${qty?.let { unit.label(it) } ?: "it"} to your stock" + if (item.refillNeeded) " and takes it off the shopping list." else ".",

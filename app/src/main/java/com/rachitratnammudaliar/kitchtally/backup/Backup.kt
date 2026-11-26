@@ -66,7 +66,8 @@ object Backup {
                     .put("note", e.note)
                     .put("createdAt", e.createdAt)
                     .put("countsFromDay", e.countsFromDay ?: JSONObject.NULL)
-                    .put("craving", e.craving),
+                    .put("craving", e.craving)
+                    .put("expiryDay", e.expiryDay),
             )
         }
         val notesJson = JSONArray()
@@ -151,6 +152,7 @@ object Backup {
                 note = o.optString("note").take(200),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis()),
                 craving = type == EventType.BOUGHT && o.optBoolean("craving", false),
+                expiryDay = if (type == EventType.BOUGHT) o.optLong("expiryDay", 0L).coerceAtLeast(0L) else 0L,
                 countsFromDay = if (type == EventType.BOUGHT && o.has("countsFromDay") && !o.isNull("countsFromDay")) o.optLong("countsFromDay") else null,
             )
         }

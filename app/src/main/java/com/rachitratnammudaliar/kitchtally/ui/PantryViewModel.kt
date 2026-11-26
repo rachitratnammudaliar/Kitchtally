@@ -23,6 +23,7 @@ import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
+import com.rachitratnammudaliar.kitchtally.reminders.ExpiryReminders
 import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Categories
@@ -93,10 +94,49 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _hiddenShops.value = next
     }
 
+    private val _expiryOn = MutableStateFlow(prefs.expiryReminders)
+    /** A phone notification before something expires. */
+    val expiryOn: StateFlow<Boolean> = _expiryOn.asStateFlow()
+    private val _expiryDays = MutableStateFlow(prefs.expiryDaysBefore)
+    val expiryDays: StateFlow<Int> = _expiryDays.asStateFlow()
+
+    fun setExpiryOn(on: Boolean) {
+        prefs.expiryReminders = on
+        _expiryOn.value = on
+        reschedule()
+    }
+
+    fun setExpiryDays(days: Int) {
+        prefs.expiryDaysBefore = days
+        _expiryDays.value = prefs.expiryDaysBefore
+        reschedule()
+    }
+
+    private fun reschedule() {
+        state.value?.let { runCatching { ExpiryReminders.schedule(getApplication(), it, prefs) } }
+    }
+
+    /** Logs everything left of an item as thrown away (a use, with a note), and returns its id so it can be undone. */
+    fun throwAway(itemId: Long, quantity: Double, onLogged: (Long) -> Unit = {}) {
+        viewModelScope.launch {
+            val id = dao.insert(
+                Event(itemId = itemId, type = EventType.USED.name, epochDay = LocalDate.now().toEpochDay(), quantity = quantity, note = "Threw away"),
+            )
+            onLogged(id)
+        }
+    }
+
     val state: StateFlow<PantryState?> = combine(dao.observeItems(), dao.observeEvents(), dao.observeNotes(), dao.observeRecipes(), _cookingOn) { items, events, notes, recipes, cooking ->
         // With cooking off, recipes are hidden everywhere (the data stays safe).
         PantryState(items, events, notes, if (cooking) recipes else emptyList())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    init {
+        // Keep the reminders matching the data: whenever anything changes, set them again.
+        viewModelScope.launch {
+            state.collect { s -> if (s != null) runCatching { ExpiryReminders.schedule(getApplication(), s, prefs) } }
+        }
+    }
 
     /** Quick taps are handled one at a time, so stock can't go below zero. */
     private val tapLock = Mutex()

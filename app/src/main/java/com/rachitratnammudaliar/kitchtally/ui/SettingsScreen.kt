@@ -128,6 +128,22 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             SectionLabel("Features")
             val cookingOn by vm.cookingOn.collectAsStateWithLifecycle()
             SwitchRow("Cooking features", "Recipes, the meal planner and Cook a meal. Off hides them; your recipes are kept", cookingOn) { vm.setCookingOn(it) }
+            val expiryOn by vm.expiryOn.collectAsStateWithLifecycle()
+            val expiryDays by vm.expiryDays.collectAsStateWithLifecycle()
+            val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                vm.setExpiryOn(granted)
+                if (!granted) scope.launch { snackbar.showSnackbar("Reminders need permission to show notifications") }
+            }
+            SwitchRow("Best-before reminders", "A notification at 9:00 before something expires. Dates are added when you log a purchase", expiryOn) { on ->
+                if (on && com.rachitratnammudaliar.kitchtally.reminders.ExpiryReminders.needsPermission(context)) {
+                    notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    vm.setExpiryOn(on)
+                }
+            }
+            if (expiryOn) {
+                ChipRow(listOf(0, 1, 2, 3, 5, 7), expiryDays, { if (it == 0) "Same day" else if (it == 1) "1 day before" else "$it days before" }, { vm.setExpiryDays(it) })
+            }
             val settingsState by vm.state.collectAsStateWithLifecycle()
             FilledTonalButton(onClick = {
                 val st = vm.state.value ?: return@FilledTonalButton

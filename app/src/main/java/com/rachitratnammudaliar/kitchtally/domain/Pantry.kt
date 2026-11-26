@@ -145,6 +145,8 @@ data class Entry(
     val countsFrom: LocalDate? = null,
     /** Bought on a craving: an avoidable expense. */
     val craving: Boolean = false,
+    /** For BOUGHT: the best-before date of this purchase. */
+    val expiry: LocalDate? = null,
 ) {
     /** The day this entry counts on the Weekly tab: purchases may be moved to next week. */
     val weekDate: LocalDate get() = if (type == EventType.BOUGHT) countsFrom ?: date else date
@@ -247,6 +249,38 @@ object Shops {
     fun options(used: List<String>): List<String> {
         val all = presets + used.map { it.trim() }.filter { it.isNotEmpty() }
         return all.distinctBy { it.lowercase() }
+    }
+}
+
+/** Best-before dates: each purchase can carry one; the item shows the earliest one still in stock. */
+object Expiry {
+    /** Stock is used oldest first, so what's left comes from the newest purchases: take the earliest date among those. */
+    fun next(entries: List<Entry>, stock: Double): LocalDate? {
+        if (stock <= 0) return null
+        var remaining = stock
+        var best: LocalDate? = null
+        for (e in entries.filter { it.type == EventType.BOUGHT && it.quantity > 0 }.sortedByDescending { it.date }) {
+            if (remaining <= 0) break
+            val ex = e.expiry
+            if (ex != null && (best == null || ex < best)) best = ex
+            remaining -= e.quantity
+        }
+        return best
+    }
+
+    /** The purchase dates plus the item's own best-before date (set on Edit item), whichever comes first. */
+    fun of(entries: List<Entry>, stock: Double, itemExpiryDay: Long): LocalDate? {
+        val own = if (stock > 0 && itemExpiryDay > 0) LocalDate.ofEpochDay(itemExpiryDay) else null
+        val next = next(entries, stock)
+        return if (own == null) next else if (next == null || own < next) own else next
+    }
+
+    /** "in 3 days", "today", "2 days ago". */
+    fun label(left: Long): String = when {
+        left < 0 -> if (left == -1L) "1 day ago" else "${-left} days ago"
+        left == 0L -> "today"
+        left == 1L -> "tomorrow"
+        else -> "in $left days"
     }
 }
 

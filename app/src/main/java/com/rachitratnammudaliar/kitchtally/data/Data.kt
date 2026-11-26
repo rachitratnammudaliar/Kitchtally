@@ -110,6 +110,9 @@ data class Event(
     // Added in database version 6 (app 1.7.0).
     /** Bought on a craving: an avoidable expense. */
     val craving: Boolean = false,
+    // Added in database version 10 (app 1.11.0).
+    /** For BOUGHT: the best-before date of this purchase (epoch day), 0 = none. */
+    val expiryDay: Long = 0,
 )
 
 fun Item.unitValue(): QtyUnit = QtyUnit.fromName(unit)
@@ -126,7 +129,7 @@ fun Event.typeValue(): EventType = EventType.fromName(type)
 
 fun Event.date(): LocalDate = LocalDate.ofEpochDay(epochDay)
 
-fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop, countsFromDay?.let { LocalDate.ofEpochDay(it) }, craving)
+fun Event.toEntry(): Entry = Entry(typeValue(), date(), quantity, priceMinor, shop, countsFromDay?.let { LocalDate.ofEpochDay(it) }, craving, expiryDay.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) })
 
 @Dao
 interface PantryDao {
@@ -339,7 +342,13 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
-@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 9, exportSchema = false)
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE events ADD COLUMN expiryDay INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+@Database(entities = [Item::class, Event::class, ShoppingNote::class, Recipe::class], version = 10, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun pantry(): PantryDao
 
@@ -352,7 +361,7 @@ abstract class AppDatabase : RoomDatabase() {
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, DATABASE_NAME)
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .build().also { instance = it }
             }
     }

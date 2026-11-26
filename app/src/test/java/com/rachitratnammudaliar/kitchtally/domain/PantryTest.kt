@@ -423,4 +423,33 @@ class PantryTest {
         assertEquals("Health", Suggestions.forName("Vitamin D3 Pills")?.category)
         assertEquals("Frozen", Suggestions.forName("French Fries")?.category)
     }
+
+    @Test
+    fun expiryTakesTheEarliestDateStillInStock() {
+        val old = Entry(EventType.BOUGHT, d(10), 1.0, expiry = d(-1))
+        val new = Entry(EventType.BOUGHT, d(2), 1.0, expiry = d(-10))
+        val e = listOf(old, new)
+        assertEquals(d(-1), Expiry.next(e, 2.0))
+        // Only one left: it comes from the newest purchase.
+        assertEquals(d(-10), Expiry.next(e, 1.0))
+        assertNull(Expiry.next(e, 0.0))
+        assertNull(Expiry.next(listOf(bought(5)), 1.0))
+    }
+
+    @Test
+    fun expiryOfItemUsesWhicheverComesFirst() {
+        val e = listOf(Entry(EventType.BOUGHT, d(2), 1.0, expiry = d(-10)))
+        assertEquals(d(-2), Expiry.of(e, 1.0, d(-2).toEpochDay()))
+        assertEquals(d(-10), Expiry.of(e, 1.0, 0L))
+        assertNull(Expiry.of(e, 0.0, d(-2).toEpochDay()))
+    }
+
+    @Test
+    fun expiryLabels() {
+        assertEquals("1 day ago", Expiry.label(-1))
+        assertEquals("3 days ago", Expiry.label(-3))
+        assertEquals("today", Expiry.label(0))
+        assertEquals("tomorrow", Expiry.label(1))
+        assertEquals("in 5 days", Expiry.label(5))
+    }
 }

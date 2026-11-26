@@ -97,6 +97,7 @@ import com.rachitratnammudaliar.kitchtally.data.lifeValue
 import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.Expiry
 import com.rachitratnammudaliar.kitchtally.domain.LongLasting
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.EventType
@@ -206,6 +207,8 @@ fun skippedFromList(item: Item, state: PantryState, today: LocalDate): Boolean =
 const val UNSURE_GROUP = "🤔  Not sure to buy again"
 const val NOREBUY_GROUP = "🚫  No need to buy again"
 const val LONG_GROUP = "🪥  Long-lasting"
+const val LOW_CHIP = "@low"
+const val EXPIRING_CHIP = "@expiring"
 
 /** Preset categories in order, then the user's own alphabetically. */
 fun orderedCategories(used: List<String>): List<String> {
@@ -458,10 +461,9 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🧩  A new home page: tap a category tile. A strip at the top shows what needs buying.")
-                    Text("🪥  Long-lasting things (toothpaste, vitamins) stay off your weekly bill. Mark any item, and see when it runs low.")
-                    Text("🏪  Each item shows its best shop. New shops: Depo and Silas.")
-                    Text("🍲  Recipes and Cook a meal are now optional: Settings → Features.")
+                    Text("📋  The home page now lists what you have, with filter chips: Running low, Expiring soon, Long-lasting and your categories.")
+                    Text("⏳  Add a best-before date when you log a purchase. A strip shows what to use first, and Settings can remind you 2 days before.")
+                    Text("🗑️  Expired? Tap Threw away to take it out of stock.")
                 }
             },
             confirmButton = { TextButton(onClick = { showNew = false; vm.markWhatsNewSeen() }) { Text("Got it") } },
@@ -493,23 +495,66 @@ private fun PantryList(
     val categories = orderedCategories(state.usedCategories)
     val active = categories.firstOrNull { it.equals(filter, ignoreCase = true) }
     val query = search.trim()
-    val shown = state.items.filter {
-        (active == null || it.category.equals(active, ignoreCase = true)) &&
-            (query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.notes.contains(query, ignoreCase = true))
+    val matching = state.items.filter {
+        query.isEmpty() || it.name.contains(query, ignoreCase = true) || it.notes.contains(query, ignoreCase = true)
     }
-    // Items you're not sure about get their own group at the bottom.
-    val longItems = shown.filter { state.isLong(it.id) }.sortedBy { it.name.lowercase() }
-    val groups = categories.mapNotNull { c ->
-        val list = shown.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }.sortedBy { it.name.lowercase() }
-        if (list.isEmpty()) null else c to list
-    } + listOfNotNull(shown.filter { it.unsure }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { UNSURE_GROUP to it }) +
-        listOfNotNull(shown.filter { it.noRebuy }.sortedBy { it.name.lowercase() }.takeIf { it.isNotEmpty() }?.let { NOREBUY_GROUP to it }) +
-        listOfNotNull(if (filter == LONG_GROUP) longItems.takeIf { it.isNotEmpty() }?.let { LONG_GROUP to it } else null)
-    val visibleGroups = if (filter.isNotEmpty()) groups.filter { it.first.equals(filter, ignoreCase = true) } else groups
-    val showTiles = filter.isEmpty() && query.isEmpty()
+    fun daysToExpiry(item: Item): Long? = Expiry.of(state.entries(item.id), state.stock(item.id), item.expiryDay)?.let { it.toEpochDay() - today.toEpochDay() }
+    fun isLow(item: Item): Boolean = state.stock(item.id) > 0 && !(item.skipping(today) || weekendTreatRest(item, today)) &&
+        Pantry.status(state.entries(item.id), item.counting(), today) != StockStatus.OK
+    val filtered = matching.filter { item ->
+        when {
+            filter == LOW_CHIP -> isLow(item)
+            filter == EXPIRING_CHIP -> daysToExpiry(item)?.let { it <= 7 } == true
+            filter == LONG_GROUP -> state.isLong(item.id)
+            active != null -> item.category.equals(active, ignoreCase = true)
+            // Toothpaste and the like have their own chip, so the main list stays about food.
+            else -> query.isNotEmpty() || !state.isLong(item.id)
+        }
+    }
+    // What you have: running low first, then what expires soonest, then A to Z.
+    val available = filtered.filter { state.stock(it.id) > 0 }.sortedWith(
+        compareBy<Item>({ if (isLow(it)) 0 else 1 }, { daysToExpiry(it)?.takeIf { d -> d <= 7 } ?: Long.MAX_VALUE }, { it.name.lowercase() }),
+    )
+    val outOfStock = filtered.filter { state.stock(it.id) <= 0 }.sortedBy { it.name.lowercase() }
+    var showOut by rememberSaveable { mutableStateOf(false) }
+    val showStrips = filter.isEmpty() && query.isEmpty()
     val needsList = state.items.filter { onShoppingList(it, state, today) }
     val lowLong = state.items.filter { state.isLong(it.id) && !it.noRebuy && !onShoppingList(it, state, today) && LongLasting.runningLow(state.entries(it.id), it.lastsDays, today) }
-    val expiring = state.items.filter { it.expiryDay > 0 && it.expiryDay - today.toEpochDay() <= 14 }
+    val expiringSoon = state.items.filter { state.stock(it.id) > 0 && daysToExpiry(it)?.let { d -> d <= 7 } == true }.sortedBy { daysToExpiry(it) }
+    val chipOptions = listOf("", LOW_CHIP, EXPIRING_CHIP, LONG_GROUP) + categories
+    val chipLabel = { key: String ->
+        when (key) {
+            "" -> "All"
+            LOW_CHIP -> "⚠️ Running low"
+            EXPIRING_CHIP -> "⏳ Expiring soon"
+            LONG_GROUP -> "🪥 Long-lasting"
+            else -> "${Categories.emojiFor(key)} $key"
+        }
+    }
+    val rowFor: @Composable (Item) -> Unit = { row ->
+        ItemRow(
+            item = row,
+            state = state,
+            today = today,
+            onClick = { onOpen(row.id) },
+            onUse = {
+                vm.use(row, shared = false) { eventId, amount ->
+                    scope.undoSnackbar(snackbar, "Used ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
+                }
+            },
+            onShare = {
+                vm.use(row, shared = true) { eventId, amount ->
+                    scope.undoSnackbar(snackbar, "Shared ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
+                }
+            },
+            onBuy = {
+                vm.quickBuy(state, row) { buy ->
+                    scope.undoSnackbar(snackbar, "Added ${row.unitValue().label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
+                }
+            },
+            onAdjust = { adjusting = row.id },
+        )
+    }
     val weekFirst by vm.weekStartDay.collectAsStateWithLifecycle()
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
     val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
@@ -580,7 +625,7 @@ private fun PantryList(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        if (showTiles && needsList.isNotEmpty()) {
+        if (showStrips && needsList.isNotEmpty()) {
             item(key = "needs-strip") {
                 Card(
                     Modifier.fillMaxWidth().clickable { onTab("shopping") },
@@ -598,117 +643,81 @@ private fun PantryList(
                 }
             }
         }
-        if (showTiles && (lowLong.isNotEmpty() || expiring.isNotEmpty())) {
-            item(key = "long-strip") {
+        if (showStrips && (lowLong.isNotEmpty() || expiringSoon.isNotEmpty())) {
+            item(key = "coming-up") {
                 Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("🪥  Long-lasting, coming up", style = MaterialTheme.typography.titleSmall)
-                        lowLong.take(4).forEach { it0 ->
-                            val out = LongLasting.runsOutOn(state.entries(it0.id), it0.lastsDays)
-                            val left = out?.let { o -> o.toEpochDay() - today.toEpochDay() } ?: 0L
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(it0.name, style = MaterialTheme.typography.bodyMedium)
-                                    Text(if (left <= 0) "Running low about now" else "Running low in about $left days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (expiringSoon.isNotEmpty()) {
+                            Text("⏳  Use first", style = MaterialTheme.typography.titleSmall)
+                            expiringSoon.take(5).forEach { it0 ->
+                                val left = daysToExpiry(it0) ?: 0L
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(it0.name, style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            if (left < 0) "Past its best-before date (${Expiry.label(left)})" else "Best before ${Expiry.label(left)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (left < 0) statusColor(StockStatus.LAST) else if (left <= 3) statusColor(StockStatus.LOW) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (left < 0) {
+                                        TextButton(onClick = {
+                                            vm.throwAway(it0.id, state.stock(it0.id)) { eventId ->
+                                                scope.undoSnackbar(snackbar, "Threw away ${it0.name}") { vm.undo(eventId) }
+                                            }
+                                        }) { Text("Threw away") }
+                                    }
                                 }
-                                TextButton(onClick = { vm.setRefillNeeded(it0, true) }) { Text("Add to shop") }
                             }
                         }
-                        expiring.take(3).forEach { it0 ->
-                            val d = it0.expiryDay - today.toEpochDay()
-                            Text("⏳  ${it0.name}: " + if (d < 0) "past its best-before date" else "best before in $d days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (lowLong.isNotEmpty()) {
+                            Text("🪥  Long-lasting, coming up", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = if (expiringSoon.isNotEmpty()) 8.dp else 0.dp))
+                            lowLong.take(4).forEach { it0 ->
+                                val out = LongLasting.runsOutOn(state.entries(it0.id), it0.lastsDays)
+                                val left = out?.let { o -> o.toEpochDay() - today.toEpochDay() } ?: 0L
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(it0.name, style = MaterialTheme.typography.bodyMedium)
+                                        Text(if (left <= 0) "Running low about now" else "Running low in about $left days", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    TextButton(onClick = { vm.setRefillNeeded(it0, true) }) { Text("Add to shop") }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-        if (showTiles) {
-            val tiles = categories.map { c ->
-                val inCat = state.items.filter { !it.unsure && !it.noRebuy && it.category.equals(c, ignoreCase = true) }
-                Triple(c, "${Categories.emojiFor(c)}\n$c", inCat to inCat.count { onShoppingList(it, state, today) })
-            } + listOfNotNull(
-                longItems.takeIf { it.isNotEmpty() }?.let { Triple(LONG_GROUP, LONG_GROUP.replaceFirst("  ", "\n"), it to it.count { x -> onShoppingList(x, state, today) }) },
-                state.items.filter { it.unsure }.takeIf { it.isNotEmpty() }?.let { Triple(UNSURE_GROUP, UNSURE_GROUP.replaceFirst("  ", "\n"), it to 0) },
-                state.items.filter { it.noRebuy }.takeIf { it.isNotEmpty() }?.let { Triple(NOREBUY_GROUP, NOREBUY_GROUP.replaceFirst("  ", "\n"), it to 0) },
-            )
-            tiles.chunked(2).forEach { pair ->
-                item(key = "tiles-${pair.first().first}") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        pair.forEach { (key, label, data) ->
-                            val (list, need) = data
-                            Card(
-                                modifier = Modifier.weight(1f).clickable { filter = key },
-                                shape = RoundedCornerShape(20.dp),
-                                colors = CardDefaults.cardColors(containerColor = if (need > 0) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant),
-                            ) {
-                                Column(Modifier.padding(14.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    val parts = label.split("\n")
-                                    Text(parts[0], style = MaterialTheme.typography.headlineMedium)
-                                    Text(parts.getOrElse(1) { "" }, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 2)
-                                    Text(
-                                        "${list.size} item${if (list.size == 1) "" else "s"}" + if (need > 0) " · $need to buy" else "",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                        if (pair.size == 1) Spacer(Modifier.weight(1f))
-                    }
-                }
-            }
+        item(key = "chips") {
+            ChipRow(chipOptions, filter, chipLabel, { filter = it })
         }
-        if (groups.isEmpty()) {
+        if (available.isEmpty() && outOfStock.isEmpty()) {
             item(key = "no-results") {
                 Text(
-                    "Nothing matches \"$query\"",
+                    if (query.isNotEmpty()) "Nothing matches \"$query\"" else "Nothing here",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(24.dp),
                 )
             }
         }
-        if (filter.isNotEmpty()) {
-            item(key = "back") {
-                TextButton(onClick = { filter = "" }) { Text("← All categories") }
-            }
-        }
-        visibleGroups.forEach { (category, items) ->
-            item(key = "cat-$category") {
+        if (available.isNotEmpty()) {
+            item(key = "available-title") {
                 Text(
-                    if (category == UNSURE_GROUP || category == NOREBUY_GROUP) "$category · ${items.size}" else "${Categories.emojiFor(category)}  $category · ${items.size}",
+                    "Available · ${available.size}",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 10.dp, start = 4.dp),
+                    modifier = Modifier.padding(top = 6.dp, start = 4.dp),
                 )
             }
-            items.forEach { row ->
-                item(key = row.id) {
-                    ItemRow(
-                        item = row,
-                        state = state,
-                        today = today,
-                        onClick = { onOpen(row.id) },
-                        onUse = {
-                            vm.use(row, shared = false) { eventId, amount ->
-                                scope.undoSnackbar(snackbar, "Used ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
-                            }
-                        },
-                        onShare = {
-                            vm.use(row, shared = true) { eventId, amount ->
-                                scope.undoSnackbar(snackbar, "Shared ${row.unitValue().label(amount)} of ${row.name}") { vm.undo(eventId) }
-                            }
-                        },
-                        onBuy = {
-                            vm.quickBuy(state, row) { buy ->
-                                scope.undoSnackbar(snackbar, "Added ${row.unitValue().label(buy.amount)} of ${row.name}") { vm.undoBuy(buy) }
-                            }
-                        },
-                        onAdjust = { adjusting = row.id },
-                    )
-                }
+            available.forEach { row -> item(key = row.id) { rowFor(row) } }
+        }
+        if (outOfStock.isNotEmpty()) {
+            item(key = "out-toggle") {
+                TextButton(onClick = { showOut = !showOut }) { Text((if (showOut) "▾" else "▸") + "  Out of stock · ${outOfStock.size}") }
             }
+            if (showOut || query.isNotEmpty()) outOfStock.forEach { row -> item(key = row.id) { rowFor(row) } }
         }
     }
 }
@@ -733,7 +742,16 @@ private fun ItemRow(item: Item, state: PantryState, today: LocalDate, onClick: (
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(item.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                StockPill(stockLabel(item, stock) + (if (skip && Pantry.status(entries, item.counting(), today) != StockStatus.OK) " · skipping" else if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
+                val expiryLeft = Expiry.of(entries, stock, item.expiryDay)?.let { it.toEpochDay() - today.toEpochDay() }
+                                StockPill(stockLabel(item, stock) + (if (skip && Pantry.status(entries, item.counting(), today) != StockStatus.OK) " · skipping" else if (item.refillNeeded && status == StockStatus.OK) " · refill" else "") + "  ±", status, onClick = onAdjust)
+                if (stock > 0 && expiryLeft != null && expiryLeft <= 14) {
+                    Text(
+                        "⏳ Best before " + Expiry.label(expiryLeft),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (expiryLeft < 0) statusColor(StockStatus.LAST) else if (expiryLeft <= 3) statusColor(StockStatus.LOW) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (expiryLeft <= 3) FontWeight.Medium else null,
+                    )
+                }
                 Text(
                     detailLine(item, state, today),
                     style = MaterialTheme.typography.bodySmall,

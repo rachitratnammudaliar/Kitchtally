@@ -177,6 +177,21 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("cooking_on", false)
         set(value) = prefs.edit().putBoolean("cooking_on", value).apply()
 
+    /** A notification before something expires. Off until you turn it on (it asks for permission). */
+    var expiryReminders: Boolean
+        get() = prefs.getBoolean("expiry_reminders", false)
+        set(value) = prefs.edit().putBoolean("expiry_reminders", value).apply()
+
+    /** How many days before the best-before date the reminder comes. */
+    var expiryDaysBefore: Int
+        get() = prefs.getInt("expiry_days_before", 2)
+        set(value) = prefs.edit().putInt("expiry_days_before", value.coerceIn(0, 14)).apply()
+
+    /** Items with a reminder currently scheduled, so old ones can be cancelled. */
+    var scheduledExpiryIds: Set<String>
+        get() = prefs.getStringSet("scheduled_expiry_ids", emptySet()) ?: emptySet()
+        set(value) = prefs.edit().putStringSet("scheduled_expiry_ids", value).apply()
+
     /** Shops you hid from the shop buttons. */
     var hiddenShops: Set<String>
         get() = prefs.getStringSet("hidden_shops", emptySet()) ?: emptySet()
