@@ -20,7 +20,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +49,7 @@ import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.counting
 import com.rachitratnammudaliar.kitchtally.data.unitValue
 import com.rachitratnammudaliar.kitchtally.domain.Dish
+import com.rachitratnammudaliar.kitchtally.domain.MealPlan
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.PlannedMeal
 import com.rachitratnammudaliar.kitchtally.domain.StockStatus
@@ -71,8 +87,9 @@ fun MealsCard(
             }
             planned.sortedWith(compareBy({ if (it.day > 0) it.day else Long.MAX_VALUE }, { it.until })).forEach { meal ->
                 val dish = dishes.firstOrNull { it.id == meal.dishId } ?: return@forEach
-                val missing = dish.ingredients.filter { !ingredientOk(state, it, today) }.mapNotNull { state.item(it)?.name }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                val missing = dish.essentials.filter { !ingredientOk(state, it, today) }.mapNotNull { state.item(it)?.name }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ItemImage(dish.name, dish.photo, size = 44.dp)
                     Column(Modifier.weight(1f)) {
                         Text(dish.name, fontWeight = FontWeight.Medium)
                         Text(
@@ -99,6 +116,9 @@ fun DishPickerDialog(
     onDismiss: () -> Unit,
 ) {
     var day by remember { mutableStateOf(0L) }
+    val plannedAll by vm.plannedMeals.collectAsState()
+    val lastWeek = MealPlan.lastWeek(plannedAll, today.toEpochDay()).mapNotNull { id -> dishes.firstOrNull { it.id == id } }
+    val thisWeek = MealPlan.upcoming(plannedAll, today.toEpochDay()).map { it.dishId }.toSet()
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add a meal") },
@@ -111,11 +131,19 @@ fun DishPickerDialog(
                         FilterChip(selected = day == d.toEpochDay(), onClick = { day = d.toEpochDay() }, label = { Text(d.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.getDefault())) })
                     }
                 }
+                val fresh = lastWeek.filter { it.id !in thisWeek }
+                if (fresh.isNotEmpty()) {
+                    Button(onClick = { fresh.forEach { vm.planMeal(it.id, 0L, today) }; onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Same as last week (${fresh.size} ${if (fresh.size == 1) "meal" else "meals"})")
+                    }
+                    Text("Last week: " + fresh.joinToString(", ") { it.name }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 if (dishes.isEmpty()) Text("No saved dishes yet. Create your first one.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyColumn(Modifier.heightIn(max = 300.dp)) {
                     items(dishes.sortedBy { it.name.lowercase() }, key = { it.id }) { dish ->
                         Row(Modifier.fillMaxWidth().clickable { vm.planMeal(dish.id, day, today); onDismiss() }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(dish.name, modifier = Modifier.weight(1f))
+                            ItemImage(dish.name, dish.photo, size = 36.dp)
+                            Text(dish.name, modifier = Modifier.weight(1f).padding(start = 10.dp))
                             TextButton(onClick = { onEdit(dish.id) }) { Text("Edit") }
                         }
                     }
@@ -127,9 +155,13 @@ fun DishPickerDialog(
     )
 }
 
-/** Name the dish and tick what it needs from your items, in stock or not. A missing item can be added on the spot. */
+/**
+ * Full-screen dish page: photo, name, and the ingredients grouped by what you still need to buy.
+ * Each ingredient is either needed or optional; only needed ones that are out or low go on the shopping list.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DishEditorDialog(
+fun DishScreen(
     vm: PantryViewModel,
     state: PantryState,
     today: LocalDate,
@@ -138,60 +170,140 @@ fun DishEditorDialog(
     onDone: () -> Unit,
 ) {
     val existing = dishes.firstOrNull { it.id == dishId }
-    var name by remember { mutableStateOf(existing?.name ?: "") }
+    var name by rememberSaveable { mutableStateOf(existing?.name ?: "") }
+    var photo by rememberSaveable { mutableStateOf(existing?.photo ?: "") }
+    val originalPhoto = existing?.photo ?: ""
     val chosen = remember { mutableStateListOf<Long>().also { l -> existing?.ingredients?.let { l.addAll(it) } } }
-    var query by remember { mutableStateOf("") }
-    val list = state.items.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
-        .sortedWith(compareByDescending<Item> { it.id in chosen }.thenBy { it.name.lowercase() })
-    val canAdd = query.isNotBlank() && state.items.none { it.name.equals(query.trim(), ignoreCase = true) }
+    val optional = remember { mutableStateListOf<Long>().also { l -> existing?.optional?.let { l.addAll(it) } } }
+    var query by rememberSaveable { mutableStateOf("") }
+    val snackbar = remember { SnackbarHostState() }
 
-    AlertDialog(
-        onDismissRequest = onDone,
-        title = { Text(if (existing == null) "New dish" else "Edit dish") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Dish, e.g. Egg curry") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search or add an ingredient") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (canAdd) {
-                    TextButton(onClick = {
-                        val n = query.trim()
-                        vm.saveItem(Item(name = n), 0.0, "") { id -> chosen.add(id) }
-                        query = ""
-                    }) { Text("＋ Add \"${query.trim()}\" as a new ingredient") }
+    fun leave() {
+        if (photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
+        onDone()
+    }
+    BackHandler(onBack = ::leave)
+
+    val chosenItems = chosen.mapNotNull { state.item(it) }
+    val toBuy = chosenItems.filter { it.id !in optional && !ingredientOk(state, it.id, today) }.sortedBy { it.name.lowercase() }
+    val have = chosenItems.filter { it.id !in optional && ingredientOk(state, it.id, today) }.sortedBy { it.name.lowercase() }
+    val optionalItems = chosenItems.filter { it.id in optional }.sortedBy { it.name.lowercase() }
+    val q = query.trim()
+    val addable = state.items.filter { it.id !in chosen && (q.isBlank() || it.name.contains(q, ignoreCase = true)) }.sortedBy { it.name.lowercase() }
+    val canCreate = q.isNotBlank() && state.items.none { it.name.equals(q, ignoreCase = true) }
+
+    @Composable
+    fun row(item: Item) {
+        val ok = ingredientOk(state, item.id, today)
+        val isOptional = item.id in optional
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(item.name)
+                Text(
+                    when {
+                        state.stock(item.id) <= 0 -> "Out of stock"
+                        !ok -> "Running low · ${item.unitValue().label(state.stock(item.id))}"
+                        else -> "Have ${item.unitValue().label(state.stock(item.id))}"
+                    },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            FilterChip(
+                selected = !isOptional,
+                onClick = { if (isOptional) optional.remove(item.id) else optional.add(item.id) },
+                label = { Text(if (isOptional) "Optional" else "Needed") },
+            )
+            TextButton(onClick = { chosen.remove(item.id); optional.remove(item.id) }) { Text("✕") }
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                title = { Text(if (existing == null) "New dish" else "Edit dish", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = { IconButton(onClick = ::leave) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = { if (existing != null) TextButton(onClick = { vm.deleteDish(dishId); onDone() }) { Text("Delete") } },
+            )
+        },
+        bottomBar = {
+            Surface(tonalElevation = 3.dp) {
+                Button(
+                    enabled = name.isNotBlank(),
+                    onClick = {
+                        if (originalPhoto.isNotBlank() && photo != originalPhoto) vm.discardPhoto(originalPhoto)
+                        val id = vm.saveDish(dishId, name, chosen.toList(), optional.toSet(), photo)
+                        if (existing == null) vm.planMeal(id, 0L, today)
+                        onDone()
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                ) {
+                    Text(
+                        (if (existing == null) "Save and plan" else "Save") +
+                            if (toBuy.isNotEmpty()) " · ${toBuy.size} to buy" else "",
+                    )
                 }
-                LazyColumn(Modifier.heightIn(max = 280.dp)) {
-                    items(list, key = { it.id }) { item ->
-                        val ok = ingredientOk(state, item.id, today)
-                        val label = when {
-                            state.stock(item.id) <= 0 -> "❌ out"
-                            !ok -> "⚠️ low · ${item.unitValue().label(state.stock(item.id))}"
-                            else -> "✅ ${item.unitValue().label(state.stock(item.id))}"
-                        }
-                        val toggle = { if (item.id in chosen) chosen.remove(item.id) else chosen.add(item.id); Unit }
-                        Row(Modifier.fillMaxWidth().clickable { toggle() }, verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(checked = item.id in chosen, onCheckedChange = { toggle() })
-                            Text(item.name, modifier = Modifier.weight(1f))
-                            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+            }
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item(key = "head") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ItemImage(name.ifBlank { "Dish" }, photo, size = 72.dp)
+                        PhotoButtons(
+                            vm = vm,
+                            hasPhoto = photo.isNotBlank(),
+                            snackbar = snackbar,
+                            onPicked = { newFile ->
+                                if (photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
+                                photo = newFile
+                            },
+                            onRemove = {
+                                if (photo.isNotBlank() && photo != originalPhoto) vm.discardPhoto(photo)
+                                photo = ""
+                            },
+                        )
+                    }
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Dish, e.g. Egg curry") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            if (toBuy.isNotEmpty()) {
+                item(key = "buyh") { Text("🛒  To buy · goes on your shopping list", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+                items(toBuy, key = { "b${it.id}" }) { row(it) }
+            }
+            if (have.isNotEmpty()) {
+                item(key = "haveh") { Text("✅  You have", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+                items(have, key = { "h${it.id}" }) { row(it) }
+            }
+            if (optionalItems.isNotEmpty()) {
+                item(key = "opth") { Text("➕  Optional · never added to the list", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+                items(optionalItems, key = { "o${it.id}" }) { row(it) }
+            }
+            item(key = "addh") {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Add ingredients", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(value = query, onValueChange = { query = it }, label = { Text("Search, or type a new one") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    if (canCreate) {
+                        Button(onClick = {
+                            vm.saveItem(Item(name = q), 0.0, "") { id -> chosen.add(id) }
+                            query = ""
+                        }, modifier = Modifier.fillMaxWidth()) { Text("＋ Add \"$q\" as a new ingredient") }
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
-                onClick = {
-                    val id = vm.saveDish(dishId, name, chosen.toList())
-                    if (existing == null) vm.planMeal(id, 0L, today)
-                    onDone()
-                },
-            ) { Text(if (existing == null) "Save and plan" else "Save") }
-        },
-        dismissButton = {
-            Row {
-                if (existing != null) TextButton(onClick = { vm.deleteDish(dishId); onDone() }) { Text("Delete dish") }
-                TextButton(onClick = onDone) { Text("Cancel") }
+            items(addable, key = { "a${it.id}" }) { item ->
+                val ok = ingredientOk(state, item.id, today)
+                Row(Modifier.fillMaxWidth().clickable { chosen.add(item.id) }.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.name, modifier = Modifier.weight(1f))
+                    Text(if (state.stock(item.id) <= 0) "❌ out" else if (!ok) "⚠️ low" else "✅ have", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { chosen.add(item.id) }) { Text("＋ Add") }
+                }
             }
-        },
-    )
+        }
+    }
 }

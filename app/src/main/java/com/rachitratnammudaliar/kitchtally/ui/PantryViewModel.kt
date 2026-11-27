@@ -105,16 +105,27 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     val plannedMeals: StateFlow<List<PlannedMeal>> = _plannedMeals.asStateFlow()
 
     /** Creates a dish (id 0) or updates one. Returns its id. */
-    fun saveDish(id: Long, name: String, ingredients: List<Long>): Long {
+    fun saveDish(id: Long, name: String, ingredients: List<Long>, optional: Set<Long> = emptySet(), photo: String = ""): Long {
         val real = if (id == 0L) MealPlan.nextId(_dishes.value) else id
-        val dish = Dish(real, name.trim(), ingredients.distinct())
+        val dish = Dish(real, name.trim(), ingredients.distinct(), optional.intersect(ingredients.toSet()), photo)
         val next = if (_dishes.value.any { it.id == real }) _dishes.value.map { if (it.id == real) dish else it } else _dishes.value + dish
         prefs.dishesText = MealPlan.encodeDishes(next)
         _dishes.value = next
         return real
     }
 
+    /** Whatever the planned meals need and you're out of or low on goes on the shopping list by itself. */
+    fun syncMealShopping(today: LocalDate) {
+        val st = state.value ?: return
+        val planned = MealPlan.upcoming(_plannedMeals.value, today.toEpochDay()).mapNotNull { m -> _dishes.value.firstOrNull { it.id == m.dishId } }
+        MealPlan.shopping(planned) { ingredientOk(st, it, today) }.forEach { id ->
+            val item = st.item(id) ?: return@forEach
+            if (!onShoppingList(item, st, today)) setRefillNeeded(item, true)
+        }
+    }
+
     fun deleteDish(id: Long) {
+        _dishes.value.firstOrNull { it.id == id }?.photo?.takeIf { it.isNotBlank() }?.let { discardPhoto(it) }
         val next = _dishes.value.filter { it.id != id }
         prefs.dishesText = MealPlan.encodeDishes(next)
         _dishes.value = next
@@ -669,7 +680,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun exportTo(uri: Uri): Int = withContext(Dispatchers.IO) {
         val items = dao.items()
-        val text = Backup.encode(items, dao.events(), dao.notes(), dao.recipes())
+        val text = Backup.encode(items, dao.events(), dao.notes(), dao.recipes(), _dishes.value, _plannedMeals.value, _weekPlan.value)
         getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
             ?: throw IllegalStateException("Couldn't write the file")
         prefs.lastBackupDay = LocalDate.now().toEpochDay()
@@ -681,8 +692,8 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         val text = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
             ?: throw IllegalStateException("Couldn't read the file")
         val contents = Backup.decode(text)
+        val newIds = mutableMapOf<Long, Long>()
         db.withTransaction {
-            val newIds = mutableMapOf<Long, Long>()
             contents.items.forEach { item ->
                 val events = contents.events.filter { it.itemId == item.id }
                 newIds[item.id] = dao.insertItemWithEvents(item.copy(id = 0), events)
@@ -692,6 +703,28 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 val lines = r.lineList().mapNotNull { l -> newIds[l.itemId]?.let { l.copy(itemId = it) } }
                 dao.insert(r.copy(id = 0, lines = encodeLines(lines)))
             }
+        }
+        // Dishes, planned meals and the week agenda point at items by id, so they follow the new ids.
+        if (contents.dishes.isNotEmpty()) {
+            val dishIds = mutableMapOf<Long, Long>()
+            var all = _dishes.value
+            contents.dishes.forEach { d ->
+                val id = MealPlan.nextId(all)
+                dishIds[d.id] = id
+                val ing = d.ingredients.mapNotNull { newIds[it] }
+                all = all + Dish(id, d.name, ing, d.optional.mapNotNull { newIds[it] }.toSet())
+            }
+            prefs.dishesText = MealPlan.encodeDishes(all)
+            _dishes.value = all
+            val meals = _plannedMeals.value + contents.meals.mapNotNull { m -> dishIds[m.dishId]?.let { m.copy(dishId = it) } }
+            prefs.plannedMealsText = MealPlan.encodePlan(meals)
+            _plannedMeals.value = meals
+        }
+        if (contents.weekPlan.isNotEmpty()) {
+            val plan = contents.weekPlan.mapValues { (_, ids) -> ids.mapNotNull { newIds[it] } }.filterValues { it.isNotEmpty() }
+            val merged = (_weekPlan.value.keys + plan.keys).associateWith { ((_weekPlan.value[it].orEmpty()) + (plan[it].orEmpty())).distinct() }
+            prefs.weekPlan = WeekPlan.encode(merged)
+            _weekPlan.value = merged
         }
         contents.items.size
     }

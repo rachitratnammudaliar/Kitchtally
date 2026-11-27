@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,13 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
     val planned = MealPlan.upcoming(plannedAll, today.toEpochDay())
     var pickingMeal by rememberSaveable { mutableStateOf(false) }
     var editingDish by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    val editing = editingDish
+    if (editing != null && state != null) {
+        DishScreen(vm, state, today, dishes, editing, onDone = { editingDish = null; pickingMeal = false })
+        return
+    }
+    LaunchedEffect(state, planned, dishes) { vm.syncMealShopping(today) }
 
     Scaffold(
         topBar = {
@@ -195,9 +203,6 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
 
         if (pickingMeal) {
             DishPickerDialog(vm, today, dishes, onEdit = { editingDish = it }, onDismiss = { pickingMeal = false })
-        }
-        editingDish?.let { id ->
-            DishEditorDialog(vm, state, today, dishes, id, onDone = { editingDish = null; pickingMeal = false })
         }
 
         picking?.let { dayEpoch ->

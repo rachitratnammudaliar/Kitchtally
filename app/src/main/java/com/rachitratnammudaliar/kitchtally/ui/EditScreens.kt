@@ -70,7 +70,7 @@ import java.time.LocalDate
 
 /** "Take photo" and "Choose photo" buttons. Calls [onPicked] with the stored file name. */
 @Composable
-private fun PhotoButtons(
+fun PhotoButtons(
     vm: PantryViewModel,
     hasPhoto: Boolean,
     snackbar: SnackbarHostState,

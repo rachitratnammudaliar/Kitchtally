@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.15.0
+- **A real dish catalogue:** each dish has a photo, a name and its ingredients, and each ingredient is Needed or Optional. Only needed ingredients you're out of or low on count as missing. Optional ones never go on the shopping list.
+- **New full-screen dish page:** ingredients are grouped as "To buy", "You have" and "Optional". Search your items, or type a new ingredient and add it on the spot. The save button shows how many you need to buy.
+- **Automatic shopping list:** when a planned meal needs something you're out of or running low on, it goes onto the shopping list by itself.
+- **Same as last week:** in Add a meal, one tap plans last week's dishes again.
+- **Backups now include** dishes, planned meals and the week agenda. Dish photos stay on the phone, like item photos. Android first, iPhone follows.
+
 ## 1.14.1
 - **Meals (iPhone):** same as Android 1.14.0. In the Week agenda, tap ＋ Meal, name a dish and tick what it needs from your items, in stock or not (a missing one can be added on the spot). The agenda shows what each meal is missing and builds the shopping list and cost estimate from all your meals. Dishes are saved for next week.
 

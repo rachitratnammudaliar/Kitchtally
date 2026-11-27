@@ -5,7 +5,10 @@ import com.rachitratnammudaliar.kitchtally.data.Item
 import com.rachitratnammudaliar.kitchtally.data.Recipe
 import com.rachitratnammudaliar.kitchtally.data.ShoppingNote
 import com.rachitratnammudaliar.kitchtally.domain.Categories
+import com.rachitratnammudaliar.kitchtally.domain.Dish
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
+import com.rachitratnammudaliar.kitchtally.domain.PlannedMeal
+import com.rachitratnammudaliar.kitchtally.domain.WeekPlan
 import com.rachitratnammudaliar.kitchtally.domain.Recipes
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Life
@@ -21,9 +24,12 @@ object Backup {
     private const val FORMAT = "kitchtally-backup"
     private const val VERSION = 6
 
-    data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList(), val recipes: List<Recipe> = emptyList())
+    data class Contents(val items: List<Item>, val events: List<Event>, val notes: List<ShoppingNote> = emptyList(), val recipes: List<Recipe> = emptyList(), val dishes: List<Dish> = emptyList(), val meals: List<PlannedMeal> = emptyList(), val weekPlan: Map<Long, List<Long>> = emptyMap())
 
-    fun encode(items: List<Item>, events: List<Event>, notes: List<ShoppingNote> = emptyList(), recipes: List<Recipe> = emptyList()): String {
+    fun encode(
+        items: List<Item>, events: List<Event>, notes: List<ShoppingNote> = emptyList(), recipes: List<Recipe> = emptyList(),
+        dishes: List<Dish> = emptyList(), meals: List<PlannedMeal> = emptyList(), weekPlan: Map<Long, List<Long>> = emptyMap(),
+    ): String {
         val itemsJson = JSONArray()
         items.forEach { i ->
             itemsJson.put(
@@ -82,6 +88,12 @@ object Backup {
                 JSONObject().put("name", r.name).put("mealsAlone", r.mealsAlone).put("mealsShared", r.mealsShared)
                     .put("plannedDay", r.plannedDay).put("lines", JSONArray(r.lines))
             }))
+            .put("dishes", JSONArray(dishes.map { d ->
+                JSONObject().put("id", d.id).put("name", d.name).put("photo", d.photo)
+                    .put("ingredients", JSONArray(d.ingredients)).put("optional", JSONArray(d.optional.toList()))
+            }))
+            .put("meals", JSONArray(meals.map { m -> JSONObject().put("dish", m.dishId).put("day", m.day).put("until", m.until) }))
+            .put("weekPlan", WeekPlan.encode(weekPlan))
             .toString(2)
     }
 
@@ -177,6 +189,27 @@ object Backup {
                 plannedDay = o.optLong("plannedDay", Recipes.NOT_PLANNED),
             )
         }
-        return Contents(items, events, notes, recipes)
+        val dishes = mutableListOf<Dish>()
+        val dishesJson = root.optJSONArray("dishes") ?: JSONArray()
+        for (i in 0 until dishesJson.length()) {
+            val o = dishesJson.optJSONObject(i) ?: continue
+            val name = o.optString("name").trim().take(80)
+            if (name.isEmpty()) continue
+            val ing = o.optJSONArray("ingredients") ?: JSONArray()
+            val opt = o.optJSONArray("optional") ?: JSONArray()
+            dishes += Dish(
+                o.optLong("id", (i + 1).toLong()), name,
+                (0 until ing.length()).map { ing.optLong(it) }.distinct(),
+                (0 until opt.length()).map { opt.optLong(it) }.toSet(),
+                "",
+            )
+        }
+        val meals = mutableListOf<PlannedMeal>()
+        val mealsJson = root.optJSONArray("meals") ?: JSONArray()
+        for (i in 0 until mealsJson.length()) {
+            val o = mealsJson.optJSONObject(i) ?: continue
+            meals += PlannedMeal(o.optLong("dish"), o.optLong("day"), o.optLong("until"))
+        }
+        return Contents(items, events, notes, recipes, dishes, meals, WeekPlan.decode(root.optString("weekPlan")))
     }
 }

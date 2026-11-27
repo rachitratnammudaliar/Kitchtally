@@ -44,7 +44,18 @@ object WeeklyBudget {
 }
 
 /** A dish you cook (name + the items it needs) and a dish planned for this week. */
-data class Dish(val id: Long, val name: String, val ingredients: List<Long>)
+data class Dish(
+    val id: Long,
+    val name: String,
+    /** Everything the dish uses. */
+    val ingredients: List<Long>,
+    /** The ones that are nice to have: never counted as missing, never put on the shopping list. */
+    val optional: Set<Long> = emptySet(),
+    /** File name of the dish photo in the app's private storage, or empty. */
+    val photo: String = "",
+) {
+    val essentials: List<Long> get() = ingredients.filter { it !in optional }
+}
 
 /** day = epoch day it's planned for, or 0 for "any day this week". until = last day it still counts. */
 data class PlannedMeal(val dishId: Long, val day: Long, val until: Long)
@@ -53,7 +64,10 @@ object MealPlan {
     private fun clean(s: String) = s.replace(Regex("[\\t\\n\\r;:]"), " ").trim()
 
     fun encodeDishes(dishes: List<Dish>): String =
-        dishes.joinToString("\n") { "${it.id}\t${clean(it.name)}\t${it.ingredients.distinct().joinToString(",")}" }
+        dishes.joinToString("\n") { d ->
+            val ing = d.ingredients.distinct().joinToString(",") { if (it in d.optional) "$it*" else "$it" }
+            "${d.id}\t${clean(d.name)}\t$ing\t${clean(d.photo)}"
+        }
 
     fun decodeDishes(text: String): List<Dish> = text.split('\n').mapNotNull { line ->
         val p = line.split('\t')
@@ -61,7 +75,10 @@ object MealPlan {
         val id = p[0].toLongOrNull() ?: return@mapNotNull null
         val name = p[1].trim()
         if (name.isBlank()) return@mapNotNull null
-        Dish(id, name, p[2].split(',').mapNotNull { it.toLongOrNull() }.distinct())
+        val tokens = p[2].split(',').filter { it.isNotBlank() }
+        val ids = tokens.mapNotNull { it.trimEnd('*').toLongOrNull() }.distinct()
+        val optional = tokens.filter { it.endsWith("*") }.mapNotNull { it.trimEnd('*').toLongOrNull() }.toSet()
+        Dish(id, name, ids, optional, p.getOrNull(3)?.trim().orEmpty())
     }
 
     fun encodePlan(plan: List<PlannedMeal>): String = plan.joinToString(";") { "${it.dishId}:${it.day}:${it.until}" }
@@ -80,7 +97,11 @@ object MealPlan {
     fun nextId(dishes: List<Dish>): Long = (dishes.maxOfOrNull { it.id } ?: 0L) + 1
 
     /** Ingredients that are out or running low. */
-    fun missing(dish: Dish, isOk: (Long) -> Boolean): List<Long> = dish.ingredients.filter { !isOk(it) }
+    fun missing(dish: Dish, isOk: (Long) -> Boolean): List<Long> = dish.essentials.filter { !isOk(it) }
+
+    /** Dishes planned in the last two weeks that are over now, newest first: what "same as last week" offers. */
+    fun lastWeek(plan: List<PlannedMeal>, today: Long): List<Long> =
+        plan.filter { it.until < today && it.until >= today - 13 }.sortedByDescending { it.until }.map { it.dishId }.distinct()
 
     /** Everything to buy across the planned dishes; an item used in two dishes counts once. */
     fun shopping(dishes: List<Dish>, isOk: (Long) -> Boolean): List<Long> = dishes.flatMap { missing(it, isOk) }.distinct()

@@ -493,4 +493,20 @@ class PantryTest {
         assertEquals(3L, MealPlan.nextId(dishes))
         assertTrue(MealPlan.decodeDishes("bad\nx\ty").isEmpty())
     }
+
+    @Test
+    fun optionalIngredientsNeverCountAsMissing() {
+        val dish = Dish(1, "Egg curry", listOf(1, 2, 3), optional = setOf(3L), photo = "p.jpg")
+        assertEquals(listOf(1L, 2L), dish.essentials)
+        assertEquals(dish, MealPlan.decodeDishes(MealPlan.encodeDishes(listOf(dish))).single())
+        assertEquals(listOf(1L, 2L), MealPlan.shopping(listOf(dish)) { false })
+        // dishes saved before optional/photo existed still load
+        assertEquals(Dish(7, "Old", listOf(4L, 5L)), MealPlan.decodeDishes("7\tOld\t4,5").single())
+    }
+
+    @Test
+    fun lastWeekOffersFinishedMealsOnce() {
+        val plan = listOf(PlannedMeal(1, 0, 90), PlannedMeal(2, 95, 95), PlannedMeal(1, 0, 92), PlannedMeal(3, 0, 50), PlannedMeal(4, 0, 105))
+        assertEquals(listOf(1L, 2L), MealPlan.lastWeek(plan, 100))
+    }
 }
