@@ -460,4 +460,13 @@ final class KitchtallyTests: XCTestCase {
                     PlannedMeal(dishId: 3, day: 0, until: 50), PlannedMeal(dishId: 4, day: 0, until: 105)]
         XCTAssertEqual(MealPlan.lastWeek(plan, today: 100), [2, 1])
     }
+
+    func testCookOnceEatSeveralTimes() {
+        let dish = Dish(id: 1, name: "Egg curry", ingredients: [1, 2], meals: 3)
+        XCTAssertEqual(MealPlan.decodeDishes(MealPlan.encodeDishes([dish])), [dish])
+        XCTAssertEqual(MealPlan.decodeDishes("2\tSabji\t3\t\t")[0].meals, 1)
+        XCTAssertEqual(MealPlan.decodeDishes("2\tSabji\t3\t\t99")[0].meals, 20)
+        let other = Dish(id: 2, name: "Sabji", ingredients: [3])
+        XCTAssertEqual(MealPlan.mealsCovered([PlannedMeal(dishId: 1, day: 0, until: 9), PlannedMeal(dishId: 2, day: 0, until: 9)], [dish, other]), 4)
+    }
 }

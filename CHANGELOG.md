@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.1
+- **Cook once, eat several times (iPhone):** same as Android 1.16.0. On a dish, set how many meals one cooking gives. The Week agenda shows "6 meals from 2 cookings". Turn it off in Settings → Meals per cooking.
+- **Fresh start for meals:** the dishes and planned meals you added before are cleared once with this update. Items, purchases, recipes and backups are untouched.
+
 ## 1.16.0
 - **Cook once, eat several times:** on a dish, set how many meals one cooking gives (for example 3). The Week agenda shows "6 meals from 2 cookings" and each planned dish shows its meals. Turn it off in Settings → Meals per cooking.
 - **Fresh start for meals:** the dishes and planned meals you added before are cleared once with this update, so you can build the catalogue again properly. Your items, purchases, recipes and backups are untouched. Android first, iPhone follows.
