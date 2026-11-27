@@ -177,6 +177,16 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("cooking_on", false)
         set(value) = prefs.edit().putBoolean("cooking_on", value).apply()
 
+    /** Show "meals per cooking" on dishes and in the agenda. */
+    var showMealCount: Boolean
+        get() = prefs.getBoolean("show_meal_count", true)
+        set(value) = prefs.edit().putBoolean("show_meal_count", value).apply()
+
+    /** One-time clean-out of earlier dishes and planned meals (version 1.16.0). */
+    var mealsCleared116: Boolean
+        get() = prefs.getBoolean("meals_cleared_116", false)
+        set(value) = prefs.edit().putBoolean("meals_cleared_116", value).apply()
+
     /** Saved dishes (see Meals) and the ones planned for this week. */
     var dishesText: String
         get() = prefs.getString("dishes", "") ?: ""

@@ -53,6 +53,8 @@ data class Dish(
     val optional: Set<Long> = emptySet(),
     /** File name of the dish photo in the app's private storage, or empty. */
     val photo: String = "",
+    /** How many meals one cooking gives (1-20): cook once, eat this many times. */
+    val meals: Int = 1,
 ) {
     val essentials: List<Long> get() = ingredients.filter { it !in optional }
 }
@@ -66,7 +68,7 @@ object MealPlan {
     fun encodeDishes(dishes: List<Dish>): String =
         dishes.joinToString("\n") { d ->
             val ing = d.ingredients.distinct().joinToString(",") { if (it in d.optional) "$it*" else "$it" }
-            "${d.id}\t${clean(d.name)}\t$ing\t${clean(d.photo)}"
+            "${d.id}\t${clean(d.name)}\t$ing\t${clean(d.photo)}\t${d.meals.coerceIn(1, 20)}"
         }
 
     fun decodeDishes(text: String): List<Dish> = text.split('\n').mapNotNull { line ->
@@ -78,7 +80,7 @@ object MealPlan {
         val tokens = p[2].split(',').filter { it.isNotBlank() }
         val ids = tokens.mapNotNull { it.trimEnd('*').toLongOrNull() }.distinct()
         val optional = tokens.filter { it.endsWith("*") }.mapNotNull { it.trimEnd('*').toLongOrNull() }.toSet()
-        Dish(id, name, ids, optional, p.getOrNull(3)?.trim().orEmpty())
+        Dish(id, name, ids, optional, p.getOrNull(3)?.trim().orEmpty(), (p.getOrNull(4)?.trim()?.toIntOrNull() ?: 1).coerceIn(1, 20))
     }
 
     fun encodePlan(plan: List<PlannedMeal>): String = plan.joinToString(";") { "${it.dishId}:${it.day}:${it.until}" }
@@ -93,6 +95,10 @@ object MealPlan {
     }
 
     fun upcoming(plan: List<PlannedMeal>, today: Long): List<PlannedMeal> = plan.filter { it.until >= today }
+
+    /** Meals you get from everything planned: each cooking gives the dish's number of meals. */
+    fun mealsCovered(planned: List<PlannedMeal>, dishes: List<Dish>): Int =
+        planned.sumOf { m -> dishes.firstOrNull { it.id == m.dishId }?.meals ?: 0 }
 
     fun nextId(dishes: List<Dish>): Long = (dishes.maxOfOrNull { it.id } ?: 0L) + 1
 

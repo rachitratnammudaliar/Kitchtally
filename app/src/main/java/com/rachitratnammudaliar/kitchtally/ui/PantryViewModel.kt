@@ -99,15 +99,33 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _weekPlan.value = next
     }
 
+    // 1.16.0 starts the meal planner fresh: earlier dishes and planned meals are cleared once.
+    private val mealsCleared: Boolean = run {
+        if (!prefs.mealsCleared116) {
+            MealPlan.decodeDishes(prefs.dishesText).forEach { d -> if (d.photo.isNotBlank()) viewModelScope.launch(Dispatchers.IO) { PhotoStore.delete(getApplication(), d.photo) } }
+            prefs.dishesText = ""
+            prefs.plannedMealsText = ""
+            prefs.mealsCleared116 = true
+        }
+        true
+    }
+
+    private val _showMealCount = MutableStateFlow(prefs.showMealCount)
+    val showMealCount: StateFlow<Boolean> = _showMealCount.asStateFlow()
+    fun setShowMealCount(on: Boolean) {
+        prefs.showMealCount = on
+        _showMealCount.value = on
+    }
+
     private val _dishes = MutableStateFlow(MealPlan.decodeDishes(prefs.dishesText))
     val dishes: StateFlow<List<Dish>> = _dishes.asStateFlow()
     private val _plannedMeals = MutableStateFlow(MealPlan.decodePlan(prefs.plannedMealsText))
     val plannedMeals: StateFlow<List<PlannedMeal>> = _plannedMeals.asStateFlow()
 
     /** Creates a dish (id 0) or updates one. Returns its id. */
-    fun saveDish(id: Long, name: String, ingredients: List<Long>, optional: Set<Long> = emptySet(), photo: String = ""): Long {
+    fun saveDish(id: Long, name: String, ingredients: List<Long>, optional: Set<Long> = emptySet(), photo: String = "", meals: Int = 1): Long {
         val real = if (id == 0L) MealPlan.nextId(_dishes.value) else id
-        val dish = Dish(real, name.trim(), ingredients.distinct(), optional.intersect(ingredients.toSet()), photo)
+        val dish = Dish(real, name.trim(), ingredients.distinct(), optional.intersect(ingredients.toSet()), photo, meals.coerceIn(1, 20))
         val next = if (_dishes.value.any { it.id == real }) _dishes.value.map { if (it.id == real) dish else it } else _dishes.value + dish
         prefs.dishesText = MealPlan.encodeDishes(next)
         _dishes.value = next
@@ -712,7 +730,7 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
                 val id = MealPlan.nextId(all)
                 dishIds[d.id] = id
                 val ing = d.ingredients.mapNotNull { newIds[it] }
-                all = all + Dish(id, d.name, ing, d.optional.mapNotNull { newIds[it] }.toSet())
+                all = all + Dish(id, d.name, ing, d.optional.mapNotNull { newIds[it] }.toSet(), "", d.meals)
             }
             prefs.dishesText = MealPlan.encodeDishes(all)
             _dishes.value = all

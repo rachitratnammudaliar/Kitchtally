@@ -17,6 +17,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,9 +80,14 @@ fun MealsCard(
     dishes: List<Dish>,
     onAdd: () -> Unit,
 ) {
+    val showMeals by vm.showMealCount.collectAsState()
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("🍲  Meals this week", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (showMeals && planned.isNotEmpty()) {
+                val total = MealPlan.mealsCovered(planned, dishes)
+                Text("🍽  $total ${if (total == 1) "meal" else "meals"} from ${planned.size} ${if (planned.size == 1) "cooking" else "cookings"}", style = MaterialTheme.typography.bodyMedium)
+            }
             if (planned.isEmpty()) {
                 Text("No meals planned. Add the dishes you'll cook and what each needs.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -93,7 +99,7 @@ fun MealsCard(
                     Column(Modifier.weight(1f)) {
                         Text(dish.name, fontWeight = FontWeight.Medium)
                         Text(
-                            dayText(meal.day, today) + " · " + if (missing.isEmpty()) "✅ you have everything" else "Missing: " + missing.joinToString(", "),
+                            dayText(meal.day, today) + (if (showMeals && dish.meals > 1) " · ${dish.meals} meals" else "") + " · " + if (missing.isEmpty()) "✅ you have everything" else "Missing: " + missing.joinToString(", "),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -176,6 +182,8 @@ fun DishScreen(
     val chosen = remember { mutableStateListOf<Long>().also { l -> existing?.ingredients?.let { l.addAll(it) } } }
     val optional = remember { mutableStateListOf<Long>().also { l -> existing?.optional?.let { l.addAll(it) } } }
     var query by rememberSaveable { mutableStateOf("") }
+    var meals by rememberSaveable { mutableStateOf(existing?.meals ?: 1) }
+    val showMeals by vm.showMealCount.collectAsState()
     val snackbar = remember { SnackbarHostState() }
 
     fun leave() {
@@ -232,7 +240,7 @@ fun DishScreen(
                     enabled = name.isNotBlank(),
                     onClick = {
                         if (originalPhoto.isNotBlank() && photo != originalPhoto) vm.discardPhoto(originalPhoto)
-                        val id = vm.saveDish(dishId, name, chosen.toList(), optional.toSet(), photo)
+                        val id = vm.saveDish(dishId, name, chosen.toList(), optional.toSet(), photo, meals)
                         if (existing == null) vm.planMeal(id, 0L, today)
                         onDone()
                     },
@@ -270,6 +278,17 @@ fun DishScreen(
                         )
                     }
                     OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Dish, e.g. Egg curry") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    if (showMeals) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Cook once, eat $meals ${if (meals == 1) "time" else "times"}", fontWeight = FontWeight.Medium)
+                                Text("How many meals one cooking gives", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            OutlinedButton(onClick = { meals = (meals - 1).coerceAtLeast(1) }, enabled = meals > 1) { Text("−") }
+                            Text("$meals", modifier = Modifier.padding(horizontal = 12.dp), fontWeight = FontWeight.SemiBold)
+                            OutlinedButton(onClick = { meals = (meals + 1).coerceAtMost(20) }, enabled = meals < 20) { Text("＋") }
+                        }
+                    }
                 }
             }
             if (toBuy.isNotEmpty()) {

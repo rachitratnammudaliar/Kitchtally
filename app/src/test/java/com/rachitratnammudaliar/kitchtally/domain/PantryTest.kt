@@ -509,4 +509,14 @@ class PantryTest {
         val plan = listOf(PlannedMeal(1, 0, 90), PlannedMeal(2, 95, 95), PlannedMeal(1, 0, 92), PlannedMeal(3, 0, 50), PlannedMeal(4, 0, 105))
         assertEquals(listOf(2L, 1L), MealPlan.lastWeek(plan, 100))
     }
+
+    @Test
+    fun cookOnceEatSeveralTimes() {
+        val dish = Dish(1, "Egg curry", listOf(1, 2), meals = 3)
+        assertEquals(dish, MealPlan.decodeDishes(MealPlan.encodeDishes(listOf(dish))).single())
+        val other = Dish(2, "Sabji", listOf(3))
+        assertEquals(1, MealPlan.decodeDishes("2\tSabji\t3\t\t").single().meals)
+        assertEquals(20, MealPlan.decodeDishes("2\tSabji\t3\t\t99").single().meals)
+        assertEquals(4, MealPlan.mealsCovered(listOf(PlannedMeal(1, 0, 9), PlannedMeal(2, 0, 9)), listOf(dish, other)))
+    }
 }

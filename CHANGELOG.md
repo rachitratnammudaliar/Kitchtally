@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.16.0
+- **Cook once, eat several times:** on a dish, set how many meals one cooking gives (for example 3). The Week agenda shows "6 meals from 2 cookings" and each planned dish shows its meals. Turn it off in Settings → Meals per cooking.
+- **Fresh start for meals:** the dishes and planned meals you added before are cleared once with this update, so you can build the catalogue again properly. Your items, purchases, recipes and backups are untouched. Android first, iPhone follows.
+
 ## 1.15.1
 - **A real dish catalogue (iPhone):** same as Android 1.15.0. Each dish has a photo, a name and its ingredients, each marked Needed or Optional. A new full-screen dish page groups ingredients as To buy, You have and Optional. Needed ingredients you're out of or low on go onto the shopping list by themselves, and "Same as last week" plans last week's dishes again. Backups now include dishes, planned meals and the week agenda.
 

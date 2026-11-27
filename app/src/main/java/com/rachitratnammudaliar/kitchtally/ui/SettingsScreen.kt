@@ -149,6 +149,8 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionLabel("Features")
             val cookingOn by vm.cookingOn.collectAsStateWithLifecycle()
+            val showMealCount by vm.showMealCount.collectAsStateWithLifecycle()
+            SwitchRow("Meals per cooking", "On a dish, set how many meals one cooking gives (cook once, eat 3 times). Shows in the Week agenda", showMealCount) { vm.setShowMealCount(it) }
             SwitchRow("Cooking features", "Recipes, the meal planner and Cook a meal. Off hides them; your recipes are kept", cookingOn) { vm.setCookingOn(it) }
             val expiryOn by vm.expiryOn.collectAsStateWithLifecycle()
             val expiryDays by vm.expiryDays.collectAsStateWithLifecycle()

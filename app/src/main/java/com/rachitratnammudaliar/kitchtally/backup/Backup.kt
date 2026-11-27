@@ -89,7 +89,7 @@ object Backup {
                     .put("plannedDay", r.plannedDay).put("lines", JSONArray(r.lines))
             }))
             .put("dishes", JSONArray(dishes.map { d ->
-                JSONObject().put("id", d.id).put("name", d.name).put("photo", d.photo)
+                JSONObject().put("id", d.id).put("name", d.name).put("photo", d.photo).put("servings", d.meals)
                     .put("ingredients", JSONArray(d.ingredients)).put("optional", JSONArray(d.optional.toList()))
             }))
             .put("meals", JSONArray(meals.map { m -> JSONObject().put("dish", m.dishId).put("day", m.day).put("until", m.until) }))
@@ -202,6 +202,7 @@ object Backup {
                 (0 until ing.length()).map { ing.optLong(it) }.distinct(),
                 (0 until opt.length()).map { opt.optLong(it) }.toSet(),
                 "",
+                o.optInt("servings", 1).coerceIn(1, 20),
             )
         }
         val meals = mutableListOf<PlannedMeal>()

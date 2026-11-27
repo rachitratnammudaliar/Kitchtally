@@ -465,7 +465,7 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🍲  Dishes now have a photo, and each ingredient is Needed or Optional. What a planned meal is missing goes on your shopping list by itself. \"Same as last week\" plans last week's dishes again.")
+                    Text("🍽  Set how many meals one cooking gives (cook once, eat 3 times). Your earlier dishes and planned meals were cleared once, so you can start the catalogue fresh.")
                     Text("📋  The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
                 }
             },
