@@ -144,7 +144,7 @@ enum Backup {
             ["name": r.name, "mealsAlone": r.mealsAlone, "mealsShared": r.mealsShared, "plannedDay": r.plannedDay,
              "lines": r.lines.map { ["i": $0.itemId, "n": $0.needed, "a": $0.amount] as [String: Any] }]
         }
-        let dishesJson: [[String: Any]] = dishes.map { ["id": $0.id, "name": $0.name, "ingredients": $0.ingredients, "optional": $0.optional] }
+        let dishesJson: [[String: Any]] = dishes.map { ["id": $0.id, "name": $0.name, "ingredients": $0.ingredients, "optional": $0.optional, "servings": $0.meals] }
         let mealsJson: [[String: Any]] = meals.map { ["dish": $0.dishId, "day": $0.day, "until": $0.until] }
         let root: [String: Any] = ["format": format, "version": 7, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson,
                                    "dishes": dishesJson, "meals": mealsJson, "weekPlan": WeekPlan.encode(weekPlan)]
@@ -254,7 +254,7 @@ enum Backup {
             if name.isEmpty { continue }
             let ing = (o["ingredients"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.int64Value }
             let opt = (o["optional"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.int64Value }
-            dishes.append(Dish(id: number(o, "id")?.int64Value ?? Int64(dishes.count + 1), name: String(name.prefix(80)), ingredients: ing, optional: opt))
+            dishes.append(Dish(id: number(o, "id")?.int64Value ?? Int64(dishes.count + 1), name: String(name.prefix(80)), ingredients: ing, optional: opt, meals: min(20, max(1, number(o, "servings")?.intValue ?? 1))))
         }
         var meals: [PlannedMeal] = []
         for case let o as [String: Any] in root["meals"] as? [Any] ?? [] {
@@ -664,7 +664,22 @@ final class Store: ObservableObject {
     @Published var weekPlan: [Int: [Int64]] = WeekPlan.decode(UserDefaults.standard.string(forKey: "week_plan") ?? "") {
         didSet { UserDefaults.standard.set(WeekPlan.encode(weekPlan), forKey: "week_plan") }
     }
-    @Published var dishes: [Dish] = MealPlan.decodeDishes(UserDefaults.standard.string(forKey: "dishes") ?? "") {
+    /// 1.16.0 starts the meal planner fresh: earlier dishes and planned meals are cleared once.
+    private static func clearMealsOnce() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "meals_cleared_116") else { return }
+        for dish in MealPlan.decodeDishes(d.string(forKey: "dishes") ?? "") where !dish.photo.isEmpty { PhotoStore.delete(dish.photo) }
+        d.set("", forKey: "dishes")
+        d.set("", forKey: "planned_meals")
+        d.set(true, forKey: "meals_cleared_116")
+    }
+
+    /// Show "meals per cooking" on dishes and in the agenda.
+    @Published var showMealCount: Bool = UserDefaults.standard.object(forKey: "show_meal_count") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMealCount, forKey: "show_meal_count") }
+    }
+
+    @Published var dishes: [Dish] = { Store.clearMealsOnce(); return MealPlan.decodeDishes(UserDefaults.standard.string(forKey: "dishes") ?? "") }() {
         didSet { UserDefaults.standard.set(MealPlan.encodeDishes(dishes), forKey: "dishes") }
     }
     @Published var plannedMeals: [PlannedMeal] = MealPlan.decodePlan(UserDefaults.standard.string(forKey: "planned_meals") ?? "") {
@@ -673,9 +688,9 @@ final class Store: ObservableObject {
 
     /// Creates a dish (id 0) or updates one. Returns its id.
     @discardableResult
-    func saveDish(_ id: Int64, name: String, ingredients: [Int64], optional: [Int64] = [], photo: String = "") -> Int64 {
+    func saveDish(_ id: Int64, name: String, ingredients: [Int64], optional: [Int64] = [], photo: String = "", meals: Int = 1) -> Int64 {
         let real = id == 0 ? MealPlan.nextId(dishes) : id
-        let dish = Dish(id: real, name: name.trimmingCharacters(in: .whitespaces), ingredients: ingredients, optional: optional.filter { ingredients.contains($0) }, photo: photo)
+        let dish = Dish(id: real, name: name.trimmingCharacters(in: .whitespaces), ingredients: ingredients, optional: optional.filter { ingredients.contains($0) }, photo: photo, meals: min(20, max(1, meals)))
         if let i = dishes.firstIndex(where: { $0.id == real }) { dishes[i] = dish } else { dishes.append(dish) }
         return real
     }
@@ -1076,7 +1091,7 @@ final class Store: ObservableObject {
         for d in contents.dishes {
             let id = MealPlan.nextId(dishes)
             dishIds[d.id] = id
-            dishes.append(Dish(id: id, name: d.name, ingredients: d.ingredients.compactMap { newIds[$0] }, optional: d.optional.compactMap { newIds[$0] }))
+            dishes.append(Dish(id: id, name: d.name, ingredients: d.ingredients.compactMap { newIds[$0] }, optional: d.optional.compactMap { newIds[$0] }, meals: d.meals))
         }
         plannedMeals += contents.meals.compactMap { m in dishIds[m.dishId].map { PlannedMeal(dishId: $0, day: m.day, until: m.until) } }
         for (day, ids) in contents.weekPlan {

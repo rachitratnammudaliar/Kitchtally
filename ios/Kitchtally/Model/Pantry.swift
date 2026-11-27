@@ -938,6 +938,8 @@ struct Dish: Identifiable, Equatable {
     var optional: [Int64] = []
     /// File name of the dish photo in the app's private storage, or empty.
     var photo: String = ""
+    /// How many meals one cooking gives (1-20): cook once, eat this many times.
+    var meals: Int = 1
 
     var essentials: [Int64] { ingredients.filter { !optional.contains($0) } }
 }
@@ -962,7 +964,7 @@ enum MealPlan {
             var seen: [Int64] = []
             for i in d.ingredients where !seen.contains(i) { seen.append(i) }
             let ing = seen.map { d.optional.contains($0) ? "\($0)*" : "\($0)" }.joined(separator: ",")
-            return "\(d.id)\t\(clean(d.name))\t\(ing)\t\(clean(d.photo))"
+            return "\(d.id)\t\(clean(d.name))\t\(ing)\t\(clean(d.photo))\t\(min(20, max(1, d.meals)))"
         }.joined(separator: "\n")
     }
 
@@ -980,7 +982,7 @@ enum MealPlan {
                 if !ing.contains(v) { ing.append(v) }
                 if star && !opt.contains(v) { opt.append(v) }
             }
-            return Dish(id: id, name: name, ingredients: ing, optional: opt, photo: p.count > 3 ? p[3].trimmingCharacters(in: .whitespaces) : "")
+            return Dish(id: id, name: name, ingredients: ing, optional: opt, photo: p.count > 3 ? p[3].trimmingCharacters(in: .whitespaces) : "", meals: min(20, max(1, p.count > 4 ? (Int(p[4].trimmingCharacters(in: .whitespaces)) ?? 1) : 1)))
         }
     }
 
@@ -997,6 +999,11 @@ enum MealPlan {
     }
 
     static func upcoming(_ plan: [PlannedMeal], today: Int) -> [PlannedMeal] { plan.filter { $0.until >= today } }
+
+    /// Meals you get from everything planned: each cooking gives the dish's number of meals.
+    static func mealsCovered(_ planned: [PlannedMeal], _ dishes: [Dish]) -> Int {
+        planned.reduce(0) { $0 + (dishes.first(where: { d in d.id == $1.dishId })?.meals ?? 0) }
+    }
 
     static func nextId(_ dishes: [Dish]) -> Int64 { (dishes.map(\.id).max() ?? 0) + 1 }
 

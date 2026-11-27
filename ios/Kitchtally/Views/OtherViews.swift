@@ -589,6 +589,7 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Meals per cooking", isOn: $store.showMealCount)
                     Toggle("Cooking features", isOn: $store.cookingOn)
                     Button("Tidy categories") {
                         let n = store.tidyCategories()
