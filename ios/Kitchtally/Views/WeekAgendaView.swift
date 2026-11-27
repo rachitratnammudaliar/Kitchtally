@@ -11,6 +11,19 @@ struct WeekAgendaView: View {
 
     private var plan: [Int: [Int64]] { WeekPlan.upcoming(store.weekPlan, today: today.epochDay) }
 
+    private func shortList(plan: [Int: [Int64]], planned: [PlannedMeal]) -> [(Item, Double)] {
+        let dayShort: [(Item, Double)] = Array(Set(plan.values.flatMap { $0 })).compactMap { id in
+            guard let item = store.item(id) else { return nil }
+            let by = WeekPlan.shortBy(plan, id, step: item.step, stock: store.stock(id))
+            return by > 0 ? (item, by) : nil
+        }
+        let mealShort: [(Item, Double)] = MealPlan.shopping(planned.compactMap { m in store.dishes.first { $0.id == m.dishId } }, isOk: { store.ingredientOk($0, today) })
+            .compactMap { id in store.item(id).map { ($0, max($0.step, 0.001)) } }
+        var merged: [Int64: (Item, Double)] = [:]
+        for (item, by) in dayShort + mealShort { merged[item.id] = (item, max(merged[item.id]?.1 ?? 0, by)) }
+        return merged.values.sorted { $0.0.name.lowercased() < $1.0.name.lowercased() }
+    }
+
     private func mealDay(_ day: Int) -> String {
         if day <= 0 { return "This week" }
         if day == today.epochDay { return "Today" }
@@ -28,16 +41,7 @@ struct WeekAgendaView: View {
     var body: some View {
         let plan = self.plan
         let planned = MealPlan.upcoming(store.plannedMeals, today: today.epochDay)
-        let dayShort: [(Item, Double)] = Array(Set(plan.values.flatMap { $0 })).compactMap { id in
-            guard let item = store.item(id) else { return nil }
-            let by = WeekPlan.shortBy(plan, id, step: item.step, stock: store.stock(id))
-            return by > 0 ? (item, by) : nil
-        }
-        let mealShort: [(Item, Double)] = MealPlan.shopping(planned.compactMap { m in store.dishes.first { $0.id == m.dishId } }, isOk: { store.ingredientOk($0, today) })
-            .compactMap { id in store.item(id).map { ($0, max($0.step, 0.001)) } }
-        var merged: [Int64: (Item, Double)] = [:]
-        for (item, by) in dayShort + mealShort { merged[item.id] = (item, max(merged[item.id]?.1 ?? 0, by)) }
-        let short: [(Item, Double)] = merged.values.sorted { $0.0.name.lowercased() < $1.0.name.lowercased() }
+        let short = shortList(plan: plan, planned: planned)
         let week = Pantry.week(Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor), store.entriesByItem, categoryOf: { id in store.item(id)?.category ?? "" }, isLong: { store.isLong($0) })
         let estimate = short.reduce(Int64(0)) { $0 + WeeklyBudget.estimateMinor(unitPrice: Recipes.unitPriceMinor(store.entries($1.0.id)), shortBy: $1.1) }
         let unpriced = short.filter { Recipes.unitPriceMinor(store.entries($0.0.id)) == nil }.count
