@@ -927,3 +927,68 @@ enum WeeklyBudget {
         return Int64((p * shortBy).rounded())
     }
 }
+
+/// A dish you cook (name + the items it needs) and a dish planned for this week.
+struct Dish: Identifiable, Equatable {
+    var id: Int64
+    var name: String
+    var ingredients: [Int64]
+}
+
+/// day = epoch day it's planned for, or 0 for "any day this week". until = last day it still counts.
+struct PlannedMeal: Identifiable, Equatable {
+    var dishId: Int64
+    var day: Int
+    var until: Int
+    var id: String { "\(dishId)-\(day)-\(until)" }
+}
+
+enum MealPlan {
+    private static func clean(_ s: String) -> String {
+        s.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: ";", with: " ")
+            .replacingOccurrences(of: ":", with: " ").trimmingCharacters(in: .whitespaces)
+    }
+
+    static func encodeDishes(_ dishes: [Dish]) -> String {
+        dishes.map { "\($0.id)\t\(clean($0.name))\t" + Array(NSOrderedSet(array: $0.ingredients)).compactMap { $0 as? Int64 }.map(String.init).joined(separator: ",") }.joined(separator: "\n")
+    }
+
+    static func decodeDishes(_ text: String) -> [Dish] {
+        text.components(separatedBy: "\n").compactMap { line in
+            let p = line.components(separatedBy: "\t")
+            guard p.count >= 3, let id = Int64(p[0]) else { return nil }
+            let name = p[1].trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { return nil }
+            var ing: [Int64] = []
+            for s in p[2].split(separator: ",") { if let v = Int64(s), !ing.contains(v) { ing.append(v) } }
+            return Dish(id: id, name: name, ingredients: ing)
+        }
+    }
+
+    static func encodePlan(_ plan: [PlannedMeal]) -> String {
+        plan.map { "\($0.dishId):\($0.day):\($0.until)" }.joined(separator: ";")
+    }
+
+    static func decodePlan(_ text: String) -> [PlannedMeal] {
+        text.split(separator: ";").compactMap { part in
+            let p = part.split(separator: ":")
+            guard p.count >= 3, let d = Int64(p[0]), let day = Int(p[1]), let until = Int(p[2]) else { return nil }
+            return PlannedMeal(dishId: d, day: day, until: until)
+        }
+    }
+
+    static func upcoming(_ plan: [PlannedMeal], today: Int) -> [PlannedMeal] { plan.filter { $0.until >= today } }
+
+    static func nextId(_ dishes: [Dish]) -> Int64 { (dishes.map(\.id).max() ?? 0) + 1 }
+
+    /// Ingredients that are out or running low.
+    static func missing(_ dish: Dish, isOk: (Int64) -> Bool) -> [Int64] { dish.ingredients.filter { !isOk($0) } }
+
+    /// Everything to buy across the planned dishes; an item used in two dishes counts once.
+    static func shopping(_ dishes: [Dish], isOk: (Int64) -> Bool) -> [Int64] {
+        var out: [Int64] = []
+        for d in dishes { for id in missing(d, isOk: isOk) where !out.contains(id) { out.append(id) } }
+        return out
+    }
+}

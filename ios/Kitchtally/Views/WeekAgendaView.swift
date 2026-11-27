@@ -6,8 +6,31 @@ struct WeekAgendaView: View {
     @Environment(\.dismiss) private var dismiss
     let today: Day
     @State private var picking: Int? = nil
+    @State private var pickingMeal = false
+    @State private var editingDish: Int64? = nil
 
     private var plan: [Int: [Int64]] { WeekPlan.upcoming(store.weekPlan, today: today.epochDay) }
+
+    private func shortList(plan: [Int: [Int64]], planned: [PlannedMeal]) -> [(Item, Double)] {
+        let dayShort: [(Item, Double)] = Array(Set(plan.values.flatMap { $0 })).compactMap { id in
+            guard let item = store.item(id) else { return nil }
+            let by = WeekPlan.shortBy(plan, id, step: item.step, stock: store.stock(id))
+            return by > 0 ? (item, by) : nil
+        }
+        let mealShort: [(Item, Double)] = MealPlan.shopping(planned.compactMap { m in store.dishes.first { $0.id == m.dishId } }, isOk: { store.ingredientOk($0, today) })
+            .compactMap { id in store.item(id).map { ($0, max($0.step, 0.001)) } }
+        var merged: [Int64: (Item, Double)] = [:]
+        for (item, by) in dayShort + mealShort { merged[item.id] = (item, max(merged[item.id]?.1 ?? 0, by)) }
+        return merged.values.sorted { $0.0.name.lowercased() < $1.0.name.lowercased() }
+    }
+
+    private func mealDay(_ day: Int) -> String {
+        if day <= 0 { return "This week" }
+        if day == today.epochDay { return "Today" }
+        if day == today.epochDay + 1 { return "Tomorrow" }
+        let f = DateFormatter(); f.dateFormat = "EEEE"
+        return f.string(from: Day(epochDay: day).localDate)
+    }
 
     private func title(_ epoch: Int) -> String {
         let f = DateFormatter()
@@ -17,11 +40,8 @@ struct WeekAgendaView: View {
 
     var body: some View {
         let plan = self.plan
-        let short: [(Item, Double)] = Array(Set(plan.values.flatMap { $0 })).compactMap { id in
-            guard let item = store.item(id) else { return nil }
-            let by = WeekPlan.shortBy(plan, id, step: item.step, stock: store.stock(id))
-            return by > 0 ? (item, by) : nil
-        }.sorted { $0.0.name.lowercased() < $1.0.name.lowercased() }
+        let planned = MealPlan.upcoming(store.plannedMeals, today: today.epochDay)
+        let short = shortList(plan: plan, planned: planned)
         let week = Pantry.week(Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor), store.entriesByItem, categoryOf: { id in store.item(id)?.category ?? "" }, isLong: { store.isLong($0) })
         let estimate = short.reduce(Int64(0)) { $0 + WeeklyBudget.estimateMinor(unitPrice: Recipes.unitPriceMinor(store.entries($1.0.id)), shortBy: $1.1) }
         let unpriced = short.filter { Recipes.unitPriceMinor(store.entries($0.0.id)) == nil }.count
@@ -29,7 +49,7 @@ struct WeekAgendaView: View {
         NavigationStack {
             List {
                 Section(header: Text("🛒  To buy for this plan")) {
-                    if plan.isEmpty {
+                    if plan.isEmpty && planned.isEmpty {
                         Text("Nothing planned yet.").foregroundColor(.secondary)
                     } else if short.isEmpty {
                         Text("✅  You have enough for everything planned.")
@@ -38,7 +58,8 @@ struct WeekAgendaView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.name)
-                                    Text("Short by \(item.unitValue.label(by)) · planned \(WeekPlan.times(plan, item.id))×, have \(item.unitValue.label(store.stock(item.id)))")
+                                    Text(WeekPlan.times(plan, item.id) == 0 ? "Needed for your meals · have \(item.unitValue.label(store.stock(item.id)))"
+                                         : "Short by \(item.unitValue.label(by)) · planned \(WeekPlan.times(plan, item.id))×, have \(item.unitValue.label(store.stock(item.id)))")
                                         .font(.caption).foregroundColor(.secondary)
                                 }
                                 Spacer()
@@ -71,6 +92,26 @@ struct WeekAgendaView: View {
                         }
                     }
                 }
+                Section(header: Text("🍲  Meals this week")) {
+                    if planned.isEmpty {
+                        Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
+                    }
+                    ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
+                        if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
+                            let missing = dish.ingredients.filter { !store.ingredientOk($0, today) }.compactMap { store.item($0)?.name }
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(dish.name).fontWeight(.medium)
+                                    Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
+                                        .font(.caption).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button("Remove") { store.plannedMeals.removeAll { $0 == meal } }.buttonStyle(.borderless)
+                            }
+                        }
+                    }
+                    Button("＋ Meal") { pickingMeal = true }
+                }
                 ForEach(0..<7, id: \.self) { offset in
                     let epoch = today.epochDay + offset
                     let ids = plan[epoch] ?? []
@@ -99,8 +140,14 @@ struct WeekAgendaView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    if !plan.isEmpty { Button("Clear") { store.weekPlan = [:] } }
+                    if !plan.isEmpty || !planned.isEmpty { Button("Clear") { store.weekPlan = [:]; store.plannedMeals = [] } }
                 }
+            }
+            .sheet(isPresented: $pickingMeal) {
+                DishPicker(today: today, onEdit: { editingDish = $0 })
+                    .sheet(item: Binding(get: { editingDish.map { EditDish(id: $0) } }, set: { editingDish = $0?.id })) { d in
+                        DishEditor(dishId: d.id, today: today) { editingDish = nil; pickingMeal = false }
+                    }
             }
             .sheet(item: Binding(get: { picking.map { PickDay(epoch: $0) } }, set: { picking = $0?.epoch })) { day in
                 PlanPicker(epoch: day.epoch, title: title(day.epoch))
@@ -137,6 +184,119 @@ private struct PlanPicker: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+}
+
+private struct EditDish: Identifiable { let id: Int64 }
+
+/// Pick a saved dish to plan, choose its day, or start a new dish.
+private struct DishPicker: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let today: Day
+    let onEdit: (Int64) -> Void
+    @State private var day = 0
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(header: Text("Day")) {
+                    Picker("Day", selection: $day) {
+                        Text("Any day").tag(0)
+                        ForEach(0..<7, id: \.self) { o in
+                            let f: DateFormatter = { let f = DateFormatter(); f.dateFormat = "EEE"; return f }()
+                            Text(f.string(from: Day(epochDay: today.epochDay + o).localDate)).tag(today.epochDay + o)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                Section(header: Text("Saved dishes")) {
+                    if store.dishes.isEmpty { Text("No saved dishes yet. Create your first one.").foregroundColor(.secondary) }
+                    ForEach(store.dishes.sorted { $0.name.lowercased() < $1.name.lowercased() }) { dish in
+                        HStack {
+                            Button { store.planMeal(dish.id, day: day, today: today); dismiss() } label: {
+                                Text(dish.name).foregroundColor(.primary)
+                            }
+                            Spacer()
+                            Button("Edit") { onEdit(dish.id) }.buttonStyle(.borderless)
+                        }
+                    }
+                    Button("＋ New dish") { onEdit(0) }
+                }
+            }
+            .navigationTitle("Add a meal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        }
+    }
+}
+
+/// Name the dish and tick what it needs from your items, in stock or not. A missing item can be added on the spot.
+private struct DishEditor: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let dishId: Int64
+    let today: Day
+    let done: () -> Void
+    @State private var name = ""
+    @State private var chosen: [Int64] = []
+    @State private var query = ""
+    @State private var loaded = false
+
+    var body: some View {
+        let existing = store.dishes.first { $0.id == dishId }
+        let list = store.items.filter { query.isEmpty || $0.name.lowercased().contains(query.lowercased()) }
+            .sorted { (chosen.contains($0.id) ? 0 : 1, $0.name.lowercased()) < (chosen.contains($1.id) ? 0 : 1, $1.name.lowercased()) }
+        let canAdd = !query.trimmingCharacters(in: .whitespaces).isEmpty && !store.items.contains { $0.name.lowercased() == query.trimmingCharacters(in: .whitespaces).lowercased() }
+        NavigationStack {
+            List {
+                Section { TextField("Dish, e.g. Egg curry", text: $name) }
+                Section(header: Text("Ingredients")) {
+                    TextField("Search or add an ingredient", text: $query)
+                    if canAdd {
+                        Button("＋ Add \"\(query.trimmingCharacters(in: .whitespaces))\" as a new ingredient") {
+                            let id = store.saveItem(Item(name: query.trimmingCharacters(in: .whitespaces)))
+                            chosen.append(id)
+                            query = ""
+                        }
+                    }
+                    ForEach(list) { item in
+                        let ok = store.ingredientOk(item.id, today)
+                        let label = store.stock(item.id) <= 0 ? "❌ out" : (!ok ? "⚠️ low · \(item.unitValue.label(store.stock(item.id)))" : "✅ \(item.unitValue.label(store.stock(item.id)))")
+                        Button {
+                            if let i = chosen.firstIndex(of: item.id) { chosen.remove(at: i) } else { chosen.append(item.id) }
+                        } label: {
+                            HStack {
+                                Image(systemName: chosen.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                Text(item.name).foregroundColor(.primary)
+                                Spacer()
+                                Text(label).font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                if existing != nil {
+                    Section { Button("Delete dish", role: .destructive) { store.deleteDish(dishId); done() } }
+                }
+            }
+            .navigationTitle(existing == nil ? "New dish" : "Edit dish")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(existing == nil ? "Save and plan" : "Save") {
+                        let id = store.saveDish(dishId, name: name, ingredients: chosen)
+                        if existing == nil { store.planMeal(id, day: 0, today: today) }
+                        done()
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .onAppear {
+                if !loaded, let d = existing { name = d.name; chosen = d.ingredients }
+                loaded = true
+            }
         }
     }
 }

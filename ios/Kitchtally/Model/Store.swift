@@ -647,6 +647,36 @@ final class Store: ObservableObject {
     @Published var weekPlan: [Int: [Int64]] = WeekPlan.decode(UserDefaults.standard.string(forKey: "week_plan") ?? "") {
         didSet { UserDefaults.standard.set(WeekPlan.encode(weekPlan), forKey: "week_plan") }
     }
+    @Published var dishes: [Dish] = MealPlan.decodeDishes(UserDefaults.standard.string(forKey: "dishes") ?? "") {
+        didSet { UserDefaults.standard.set(MealPlan.encodeDishes(dishes), forKey: "dishes") }
+    }
+    @Published var plannedMeals: [PlannedMeal] = MealPlan.decodePlan(UserDefaults.standard.string(forKey: "planned_meals") ?? "") {
+        didSet { UserDefaults.standard.set(MealPlan.encodePlan(plannedMeals), forKey: "planned_meals") }
+    }
+
+    /// Creates a dish (id 0) or updates one. Returns its id.
+    @discardableResult
+    func saveDish(_ id: Int64, name: String, ingredients: [Int64]) -> Int64 {
+        let real = id == 0 ? MealPlan.nextId(dishes) : id
+        let dish = Dish(id: real, name: name.trimmingCharacters(in: .whitespaces), ingredients: ingredients)
+        if let i = dishes.firstIndex(where: { $0.id == real }) { dishes[i] = dish } else { dishes.append(dish) }
+        return real
+    }
+
+    func deleteDish(_ id: Int64) {
+        dishes.removeAll { $0.id == id }
+        plannedMeals.removeAll { $0.dishId == id }
+    }
+
+    func planMeal(_ dishId: Int64, day: Int, today: Day) {
+        plannedMeals.append(PlannedMeal(dishId: dishId, day: day, until: day > 0 ? day : today.epochDay + 6))
+    }
+
+    func ingredientOk(_ id: Int64, _ today: Day) -> Bool {
+        guard let item = item(id) else { return true }
+        return stock(id) > 0 && status(item, today) == .ok
+    }
+
     func planToggle(_ day: Int, _ itemId: Int64) { weekPlan = WeekPlan.toggle(weekPlan, day: day, itemId: itemId) }
 
     /// Takes everything left of an item out of stock as thrown away. Returns the event id for Undo.
