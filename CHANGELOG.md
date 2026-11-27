@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.13.0
+- **Weekly budget:** set one in Settings → Spending (for example 15). The home page shows what you've spent this week against it with a progress bar, and the Weekly tab does too. Settings shows the monthly equivalent (15 a week is about 65 a month). Long-lasting things (toothpaste, vitamins) are never counted, so the budget only covers the weekly shop.
+- **Week agenda now shows the cost:** it estimates what the missing items will cost at the last price you paid and tells you if the plan fits your weekly budget or goes over. Android and iPhone together.
+
 ## 1.12.0
 - **Week agenda:** a new button on the home page. Plan the next 7 days by picking what you'll use each day. The agenda shows what you won't have enough of for the week and adds it to your shopping list in one tap ("Add all to shopping list"). It stays on your phone and isn't part of backups. Android and iPhone together.
 

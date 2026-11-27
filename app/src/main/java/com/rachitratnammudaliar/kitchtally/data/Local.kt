@@ -202,6 +202,11 @@ class Prefs(context: Context) {
         get() = prefs.getStringSet("hidden_shops", emptySet()) ?: emptySet()
         set(value) = prefs.edit().putStringSet("hidden_shops", value).apply()
 
+    /** Weekly budget in cents; 0 means off. */
+    var weeklyBudgetMinor: Long
+        get() = prefs.getLong("weekly_budget_minor", 0L)
+        set(value) = prefs.edit().putLong("weekly_budget_minor", value.coerceAtLeast(0L)).apply()
+
     /** Monthly budget in cents; 0 means off. */
     var budgetMinor: Long
         get() = prefs.getLong("budget_minor", 0L)

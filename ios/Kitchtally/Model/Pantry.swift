@@ -915,3 +915,15 @@ enum WeekPlan {
         return max(0, (need * 1000).rounded() / 1000)
     }
 }
+
+/// Weekly budget maths. Long-lasting things are never in the weekly bill, so they never count here.
+enum WeeklyBudget {
+    /// A weekly budget as a monthly figure: €15 a week is about €65 a month.
+    static func monthlyOf(_ weeklyMinor: Int64) -> Int64 { Int64((Double(weeklyMinor) * 52.0 / 12.0).rounded()) }
+
+    /// What a shortfall should cost at the last price paid per unit; 0 when there is no price yet.
+    static func estimateMinor(unitPrice: Double?, shortBy: Double) -> Int64 {
+        guard let p = unitPrice, shortBy > 0 else { return 0 }
+        return Int64((p * shortBy).rounded())
+    }
+}

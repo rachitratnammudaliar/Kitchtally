@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.domain.Money
+import com.rachitratnammudaliar.kitchtally.domain.WeeklyBudget
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -106,6 +107,27 @@ fun SettingsScreen(vm: PantryViewModel, currency: String, onBack: () -> Unit) {
             val showSpending by vm.showSpending.collectAsStateWithLifecycle()
             val budget by vm.budgetMinor.collectAsStateWithLifecycle()
             SwitchRow("Show spending on Weekly", "Off keeps money out of sight until you tap Show spending", showSpending) { vm.setShowSpending(it) }
+            val weeklyBudget by vm.weeklyBudgetMinor.collectAsStateWithLifecycle()
+            var weeklyText by rememberSaveable { mutableStateOf(if (weeklyBudget > 0) Money.minorToInput(weeklyBudget) else "") }
+            val weeklyValue = if (weeklyText.isBlank()) 0L else Money.parseToMinor(weeklyText)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NumberField(
+                    value = weeklyText,
+                    onChange = { weeklyText = it },
+                    label = "Weekly budget in $currency (optional)",
+                    isError = weeklyValue == null,
+                    error = "A number, or leave it empty",
+                    modifier = Modifier.weight(1f),
+                )
+                FilledTonalButton(onClick = {
+                    vm.setWeeklyBudget(weeklyValue ?: 0L)
+                    scope.launch { snackbar.showSnackbar(if ((weeklyValue ?: 0L) > 0) "Weekly budget saved" else "Weekly budget off") }
+                }, enabled = weeklyValue != null) { Text("Save") }
+            }
+            Hint(
+                if ((weeklyValue ?: 0L) > 0) "About ${Money.format(WeeklyBudget.monthlyOf(weeklyValue ?: 0L), currency)} a month. Long-lasting things (toothpaste, vitamins) are not counted."
+                else "Shown on the home page and the Week agenda. Long-lasting things are not counted. Leave it empty to turn it off.",
+            )
             var budgetText by rememberSaveable { mutableStateOf(if (budget > 0) Money.minorToInput(budget) else "") }
             val budgetValue = if (budgetText.isBlank()) 0L else Money.parseToMinor(budgetText)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -71,7 +71,7 @@ struct PantryView: View {
             .alert("What's new", isPresented: $showNew) {
                 Button("Got it") { store.markWhatsNewSeen() }
             } message: {
-                Text("📅 New Week agenda (button on the home page): pick what you'll use each day, and see what you need to buy for the week.\n\n📦 The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
+                Text("📅 New Weekly budget: set it in Settings and see it on the home page. The Week agenda now estimates the cost of what you need to buy.\n\n📦 The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }
@@ -253,6 +253,16 @@ struct PantryView: View {
                     StatTile(value: "\(toBuy)", label: "to buy").onTapGesture { tab = 1 }
                 }
                 .padding(.top, 8)
+                if store.weeklyBudgetMinor > 0 {
+                    let b = store.weeklyBudgetMinor, spent = week.spentMinor
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(spent <= b ? "💶  \(Money.format(spent, store.currency)) of \(Money.format(b, store.currency)) this week · \(Money.format(b - spent, store.currency)) left"
+                             : "💶  \(Money.format(spent, store.currency)) of \(Money.format(b, store.currency)) this week · \(Money.format(spent - b, store.currency)) over")
+                            .font(.subheadline.weight(.medium))
+                        ProgressView(value: min(Double(spent), Double(b)), total: Double(b))
+                    }
+                    .padding(.top, 8)
+                }
                 Button { showAgenda = true } label: {
                     Text("📅  Week agenda").frame(maxWidth: .infinity)
                 }

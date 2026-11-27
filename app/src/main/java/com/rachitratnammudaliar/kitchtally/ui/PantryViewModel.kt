@@ -262,6 +262,15 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
     /** Where a purchase made right now should start counting, or null for this week. */
     private fun buyCountsFrom(): Long? = prefs.forNextWeekUntil.takeIf { it > LocalDate.now().toEpochDay() }
 
+    private val _weeklyBudgetMinor = MutableStateFlow(prefs.weeklyBudgetMinor)
+    /** What you want to spend on the weekly shop (long-lasting things not counted). 0 = off. */
+    val weeklyBudgetMinor: StateFlow<Long> = _weeklyBudgetMinor.asStateFlow()
+
+    fun setWeeklyBudget(minor: Long) {
+        prefs.weeklyBudgetMinor = minor
+        _weeklyBudgetMinor.value = prefs.weeklyBudgetMinor
+    }
+
     private val _budgetMinor = MutableStateFlow(prefs.budgetMinor)
     val budgetMinor: StateFlow<Long> = _budgetMinor.asStateFlow()
 

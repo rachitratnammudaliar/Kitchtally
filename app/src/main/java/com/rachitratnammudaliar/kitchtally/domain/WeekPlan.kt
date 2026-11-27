@@ -32,3 +32,13 @@ object WeekPlan {
     fun shortBy(plan: Map<Long, List<Long>>, itemId: Long, step: Double, stock: Double): Double =
         Qty.round((times(plan, itemId) * step.coerceAtLeast(0.001) - stock).coerceAtLeast(0.0))
 }
+
+/** Weekly budget maths. Long-lasting things are never in the weekly bill, so they never count here. */
+object WeeklyBudget {
+    /** A weekly budget as a monthly figure: €15 a week is about €65 a month. */
+    fun monthlyOf(weeklyMinor: Long): Long = Math.round(weeklyMinor * 52.0 / 12.0)
+
+    /** What a shortfall should cost at the last price paid per unit; 0 when there is no price yet. */
+    fun estimateMinor(unitPriceMinor: Double?, shortBy: Double): Long =
+        if (unitPriceMinor == null || shortBy <= 0) 0L else Math.round(unitPriceMinor * shortBy)
+}

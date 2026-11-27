@@ -471,4 +471,13 @@ class PantryTest {
         assertEquals(0.0, WeekPlan.shortBy(plan, 1, 1.0, 5.0), 0.0001)
         assertEquals(setOf(11L, 12L), WeekPlan.upcoming(plan, 11).keys)
     }
+
+    @Test
+    fun weeklyBudgetMonthlyAndEstimate() {
+        assertEquals(6500L, WeeklyBudget.monthlyOf(1500L))
+        assertEquals(4333L, WeeklyBudget.monthlyOf(1000L))
+        assertEquals(108L, WeeklyBudget.estimateMinor(54.0, 2.0))
+        assertEquals(0L, WeeklyBudget.estimateMinor(null, 2.0))
+        assertEquals(0L, WeeklyBudget.estimateMinor(54.0, 0.0))
+    }
 }

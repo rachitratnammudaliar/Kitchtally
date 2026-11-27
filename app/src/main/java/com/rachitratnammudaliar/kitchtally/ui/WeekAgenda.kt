@@ -41,7 +41,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.data.unitValue
+import com.rachitratnammudaliar.kitchtally.domain.Money
+import com.rachitratnammudaliar.kitchtally.domain.Pantry
+import com.rachitratnammudaliar.kitchtally.domain.Recipes
 import com.rachitratnammudaliar.kitchtally.domain.WeekPlan
+import com.rachitratnammudaliar.kitchtally.domain.WeeklyBudget
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.TextStyle
 import java.util.Locale
@@ -71,6 +76,14 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
             val by = WeekPlan.shortBy(plan, id, item.step, state.stock(id))
             if (by > 0) item to by else null
         }.sortedBy { it.first.name.lowercase() }
+        val currency by vm.currency.collectAsState()
+        val weeklyBudget by vm.weeklyBudgetMinor.collectAsState()
+        val weekFirst by vm.weekStartDay.collectAsState()
+        val weekAnchor by vm.weekAnchorDay.collectAsState()
+        val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
+        val spent = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst), anchor), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = { id -> state.item(id)?.category ?: "" }).spentMinor
+        val estimate = short.sumOf { (item, by) -> WeeklyBudget.estimateMinor(Recipes.unitPriceMinor(state.entries(item.id)), by) }
+        val unpriced = short.count { Recipes.unitPriceMinor(state.entries(it.first.id)) == null }
         val toAdd = short.filter { !onShoppingList(it.first, state, today) }
 
         LazyColumn(
@@ -104,6 +117,19 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                                         if (onShoppingList(item, state, today)) Text("On list ✓", style = MaterialTheme.typography.bodySmall)
                                         else TextButton(onClick = { vm.setRefillNeeded(item, true) }) { Text("Add to shop") }
                                     }
+                                }
+                                Text(
+                                    "Estimated cost: ${Money.format(estimate, currency)}" + if (unpriced > 0) " (+ $unpriced without a price yet)" else "",
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (weeklyBudget > 0) {
+                                    val left = weeklyBudget - spent - estimate
+                                    Text(
+                                        if (left >= 0) "Fits your ${Money.format(weeklyBudget, currency)} weekly budget, ${Money.format(left, currency)} to spare."
+                                        else "${Money.format(-left, currency)} over your ${Money.format(weeklyBudget, currency)} weekly budget. Drop something or plan cheaper.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (left >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                    )
                                 }
                                 if (toAdd.size > 1) {
                                     Button(onClick = { toAdd.forEach { vm.setRefillNeeded(it.first, true) } }, modifier = Modifier.fillMaxWidth()) {
