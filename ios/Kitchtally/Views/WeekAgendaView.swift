@@ -38,6 +38,57 @@ struct WeekAgendaView: View {
         return f.string(from: Day(epochDay: epoch).localDate) + (epoch == today.epochDay ? " · Today" : "")
     }
 
+    @ViewBuilder
+    private func mealsSection(planned: [PlannedMeal]) -> some View {
+        Section(header: Text("🍲  Meals this week")) {
+            if planned.isEmpty {
+                Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
+            }
+            ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
+                if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
+                    let missing = dish.essentials.filter { !store.ingredientOk($0, today) }.compactMap { store.item($0)?.name }
+                    HStack(spacing: 10) {
+                        ItemImage(name: dish.name, photoFile: dish.photo, category: "", size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(dish.name).fontWeight(.medium)
+                            Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Remove") { store.plannedMeals.removeAll { $0 == meal } }.buttonStyle(.borderless)
+                    }
+                }
+            }
+            Button("＋ Meal") { pickingMeal = true }
+        }
+    }
+
+    @ViewBuilder
+    private func daysSections(plan: [Int: [Int64]]) -> some View {
+        ForEach(0..<7, id: \.self) { offset in
+            let epoch = today.epochDay + offset
+            let ids = plan[epoch] ?? []
+            Section {
+                if ids.isEmpty {
+                    Text("Nothing planned").font(.caption).foregroundColor(.secondary)
+                }
+                ForEach(ids, id: \.self) { id in
+                    if let item = store.item(id) {
+                        HStack {
+                            Text(item.name)
+                            Spacer()
+                            Button { store.planToggle(epoch, id) } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
+                                .buttonStyle(.borderless).accessibilityLabel("Remove \(item.name)")
+                        }
+                    }
+                }
+                Button("＋ Add") { picking = epoch }
+            } header: {
+                Text(title(epoch))
+            }
+        }
+    }
+
     var body: some View {
         let plan = self.plan
         let planned = MealPlan.upcoming(store.plannedMeals, today: today.epochDay)
@@ -92,49 +143,12 @@ struct WeekAgendaView: View {
                         }
                     }
                 }
-                Section(header: Text("🍲  Meals this week")) {
-                    if planned.isEmpty {
-                        Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
-                    }
-                    ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
-                        if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
-                            let missing = dish.ingredients.filter { !store.ingredientOk($0, today) }.compactMap { store.item($0)?.name }
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(dish.name).fontWeight(.medium)
-                                    Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Button("Remove") { store.plannedMeals.removeAll { $0 == meal } }.buttonStyle(.borderless)
-                            }
-                        }
-                    }
-                    Button("＋ Meal") { pickingMeal = true }
-                }
-                ForEach(0..<7, id: \.self) { offset in
-                    let epoch = today.epochDay + offset
-                    let ids = plan[epoch] ?? []
-                    Section {
-                        if ids.isEmpty {
-                            Text("Nothing planned").font(.caption).foregroundColor(.secondary)
-                        }
-                        ForEach(ids, id: \.self) { id in
-                            if let item = store.item(id) {
-                                HStack {
-                                    Text(item.name)
-                                    Spacer()
-                                    Button { store.planToggle(epoch, id) } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
-                                        .buttonStyle(.borderless).accessibilityLabel("Remove \(item.name)")
-                                }
-                            }
-                        }
-                        Button("＋ Add") { picking = epoch }
-                    } header: {
-                        Text(title(epoch))
-                    }
-                }
+                mealsSection(planned: planned)
+                daysSections(plan: plan)
             }
+            .onAppear { store.syncMealShopping(today) }
+            .onChange(of: store.plannedMeals) { _ in store.syncMealShopping(today) }
+            .onChange(of: store.dishes) { _ in store.syncMealShopping(today) }
             .navigationTitle("Week agenda")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -211,12 +225,26 @@ private struct DishPicker: View {
                     }
                     .pickerStyle(.menu)
                 }
+                let planned = Set(MealPlan.upcoming(store.plannedMeals, today: today.epochDay).map(\.dishId))
+                let fresh = MealPlan.lastWeek(store.plannedMeals, today: today.epochDay).filter { !planned.contains($0) }.compactMap { id in store.dishes.first { $0.id == id } }
+                if !fresh.isEmpty {
+                    Section {
+                        Button("Same as last week (\(fresh.count) \(fresh.count == 1 ? "meal" : "meals"))") {
+                            for d in fresh { store.planMeal(d.id, day: 0, today: today) }
+                            dismiss()
+                        }
+                        Text("Last week: " + fresh.map(\.name).joined(separator: ", ")).font(.caption).foregroundColor(.secondary)
+                    }
+                }
                 Section(header: Text("Saved dishes")) {
                     if store.dishes.isEmpty { Text("No saved dishes yet. Create your first one.").foregroundColor(.secondary) }
                     ForEach(store.dishes.sorted { $0.name.lowercased() < $1.name.lowercased() }) { dish in
                         HStack {
                             Button { store.planMeal(dish.id, day: day, today: today); dismiss() } label: {
-                                Text(dish.name).foregroundColor(.primary)
+                                HStack(spacing: 10) {
+                                    ItemImage(name: dish.name, photoFile: dish.photo, category: "", size: 34)
+                                    Text(dish.name).foregroundColor(.primary)
+                                }
                             }
                             Spacer()
                             Button("Edit") { onEdit(dish.id) }.buttonStyle(.borderless)
@@ -232,7 +260,8 @@ private struct DishPicker: View {
     }
 }
 
-/// Name the dish and tick what it needs from your items, in stock or not. A missing item can be added on the spot.
+/// Full-screen dish page: photo, name, and the ingredients grouped by what you still need to buy.
+/// Each ingredient is either needed or optional; only needed ones that are out or low go on the shopping list.
 private struct DishEditor: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -240,38 +269,86 @@ private struct DishEditor: View {
     let today: Day
     let done: () -> Void
     @State private var name = ""
+    @State private var photo = ""
+    @State private var originalPhoto = ""
     @State private var chosen: [Int64] = []
+    @State private var optional: [Int64] = []
     @State private var query = ""
     @State private var loaded = false
 
+    private func leave() {
+        if !photo.isEmpty && photo != originalPhoto { PhotoStore.delete(photo) }
+        done()
+    }
+
+    private func row(_ item: Item) -> some View {
+        let ok = store.ingredientOk(item.id, today)
+        let isOptional = optional.contains(item.id)
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                Text(store.stock(item.id) <= 0 ? "Out of stock" : (!ok ? "Running low · \(item.unitValue.label(store.stock(item.id)))" : "Have \(item.unitValue.label(store.stock(item.id)))"))
+                    .font(.caption).foregroundColor(.secondary)
+            }
+            Spacer()
+            Button(isOptional ? "Optional" : "Needed") {
+                if let i = optional.firstIndex(of: item.id) { optional.remove(at: i) } else { optional.append(item.id) }
+            }
+            .buttonStyle(.bordered)
+            Button { chosen.removeAll { $0 == item.id }; optional.removeAll { $0 == item.id } } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
+                .buttonStyle(.borderless)
+        }
+    }
+
     var body: some View {
         let existing = store.dishes.first { $0.id == dishId }
-        let list = store.items.filter { query.isEmpty || $0.name.lowercased().contains(query.lowercased()) }
-            .sorted { (chosen.contains($0.id) ? 0 : 1, $0.name.lowercased()) < (chosen.contains($1.id) ? 0 : 1, $1.name.lowercased()) }
-        let canAdd = !query.trimmingCharacters(in: .whitespaces).isEmpty && !store.items.contains { $0.name.lowercased() == query.trimmingCharacters(in: .whitespaces).lowercased() }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let chosenItems = chosen.compactMap { store.item($0) }
+        let sorted: ([Item]) -> [Item] = { $0.sorted { $0.name.lowercased() < $1.name.lowercased() } }
+        let toBuy = sorted(chosenItems.filter { !optional.contains($0.id) && !store.ingredientOk($0.id, today) })
+        let have = sorted(chosenItems.filter { !optional.contains($0.id) && store.ingredientOk($0.id, today) })
+        let optionalItems = sorted(chosenItems.filter { optional.contains($0.id) })
+        let addable = sorted(store.items.filter { !chosen.contains($0.id) && (q.isEmpty || $0.name.lowercased().contains(q.lowercased())) })
+        let canCreate = !q.isEmpty && !store.items.contains { $0.name.lowercased() == q.lowercased() }
         NavigationStack {
             List {
-                Section { TextField("Dish, e.g. Egg curry", text: $name) }
-                Section(header: Text("Ingredients")) {
-                    TextField("Search or add an ingredient", text: $query)
-                    if canAdd {
-                        Button("＋ Add \"\(query.trimmingCharacters(in: .whitespaces))\" as a new ingredient") {
-                            let id = store.saveItem(Item(name: query.trimmingCharacters(in: .whitespaces)))
-                            chosen.append(id)
+                Section {
+                    HStack(spacing: 14) {
+                        ItemImage(name: name.isEmpty ? "Dish" : name, photoFile: photo, category: "", size: 64)
+                        PhotoButtons(hasPhoto: !photo.isEmpty, onPicked: { newFile in
+                            if !photo.isEmpty && photo != originalPhoto { PhotoStore.delete(photo) }
+                            photo = newFile
+                        }, onRemove: {
+                            if photo != originalPhoto { PhotoStore.delete(photo) }
+                            photo = ""
+                        })
+                    }
+                    TextField("Dish, e.g. Egg curry", text: $name)
+                }
+                if !toBuy.isEmpty {
+                    Section(header: Text("🛒  To buy · goes on your shopping list")) { ForEach(toBuy) { row($0) } }
+                }
+                if !have.isEmpty {
+                    Section(header: Text("✅  You have")) { ForEach(have) { row($0) } }
+                }
+                if !optionalItems.isEmpty {
+                    Section(header: Text("➕  Optional · never added to the list")) { ForEach(optionalItems) { row($0) } }
+                }
+                Section(header: Text("Add ingredients")) {
+                    TextField("Search, or type a new one", text: $query)
+                    if canCreate {
+                        Button("＋ Add \"\(q)\" as a new ingredient") {
+                            chosen.append(store.saveItem(Item(name: q)))
                             query = ""
                         }
                     }
-                    ForEach(list) { item in
-                        let ok = store.ingredientOk(item.id, today)
-                        let label = store.stock(item.id) <= 0 ? "❌ out" : (!ok ? "⚠️ low · \(item.unitValue.label(store.stock(item.id)))" : "✅ \(item.unitValue.label(store.stock(item.id)))")
-                        Button {
-                            if let i = chosen.firstIndex(of: item.id) { chosen.remove(at: i) } else { chosen.append(item.id) }
-                        } label: {
+                    ForEach(addable) { item in
+                        Button { chosen.append(item.id) } label: {
                             HStack {
-                                Image(systemName: chosen.contains(item.id) ? "checkmark.circle.fill" : "circle")
                                 Text(item.name).foregroundColor(.primary)
                                 Spacer()
-                                Text(label).font(.caption).foregroundColor(.secondary)
+                                Text(store.stock(item.id) <= 0 ? "❌ out" : (!store.ingredientOk(item.id, today) ? "⚠️ low" : "✅ have")).font(.caption).foregroundColor(.secondary)
+                                Image(systemName: "plus.circle").foregroundColor(.accentColor)
                             }
                         }
                     }
@@ -283,18 +360,24 @@ private struct DishEditor: View {
             .navigationTitle(existing == nil ? "New dish" : "Edit dish")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { done() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(existing == nil ? "Save and plan" : "Save") {
-                        let id = store.saveDish(dishId, name: name, ingredients: chosen)
-                        if existing == nil { store.planMeal(id, day: 0, today: today) }
-                        done()
-                    }
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { leave() } }
+            }
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    if !originalPhoto.isEmpty && photo != originalPhoto { PhotoStore.delete(originalPhoto) }
+                    let id = store.saveDish(dishId, name: name, ingredients: chosen, optional: optional, photo: photo)
+                    if existing == nil { store.planMeal(id, day: 0, today: today) }
+                    done()
+                } label: {
+                    Text((existing == nil ? "Save and plan" : "Save") + (toBuy.isEmpty ? "" : " · \(toBuy.count) to buy")).frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .padding()
+                .background(.bar)
             }
             .onAppear {
-                if !loaded, let d = existing { name = d.name; chosen = d.ingredients }
+                if !loaded, let d = existing { name = d.name; photo = d.photo; originalPhoto = d.photo; chosen = d.ingredients; optional = d.optional }
                 loaded = true
             }
         }

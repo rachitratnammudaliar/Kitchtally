@@ -446,4 +446,18 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(MealPlan.nextId(dishes), 3)
         XCTAssertTrue(MealPlan.decodeDishes("bad\nx\ty").isEmpty)
     }
+
+    func testOptionalIngredientsNeverCountAsMissing() {
+        let dish = Dish(id: 1, name: "Egg curry", ingredients: [1, 2, 3], optional: [3], photo: "p.jpg")
+        XCTAssertEqual(dish.essentials, [1, 2])
+        XCTAssertEqual(MealPlan.decodeDishes(MealPlan.encodeDishes([dish])), [dish])
+        XCTAssertEqual(MealPlan.shopping([dish], isOk: { _ in false }), [1, 2])
+        XCTAssertEqual(MealPlan.decodeDishes("7\tOld\t4,5"), [Dish(id: 7, name: "Old", ingredients: [4, 5])])
+    }
+
+    func testLastWeekOffersFinishedMealsOnce() {
+        let plan = [PlannedMeal(dishId: 1, day: 0, until: 90), PlannedMeal(dishId: 2, day: 95, until: 95), PlannedMeal(dishId: 1, day: 0, until: 92),
+                    PlannedMeal(dishId: 3, day: 0, until: 50), PlannedMeal(dishId: 4, day: 0, until: 105)]
+        XCTAssertEqual(MealPlan.lastWeek(plan, today: 100), [2, 1])
+    }
 }
