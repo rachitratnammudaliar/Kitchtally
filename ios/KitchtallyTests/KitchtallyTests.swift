@@ -435,4 +435,15 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(WeeklyBudget.estimateMinor(unitPrice: 54, shortBy: 2), 108)
         XCTAssertEqual(WeeklyBudget.estimateMinor(unitPrice: nil, shortBy: 2), 0)
     }
+
+    func testMealsRoundTripAndShopping() {
+        let dishes = [Dish(id: 1, name: "Egg curry", ingredients: [1, 2, 3]), Dish(id: 2, name: "Aloo sabji", ingredients: [3, 4])]
+        XCTAssertEqual(MealPlan.decodeDishes(MealPlan.encodeDishes(dishes)), dishes)
+        let plan = [PlannedMeal(dishId: 1, day: 0, until: 20), PlannedMeal(dishId: 2, day: 18, until: 18)]
+        XCTAssertEqual(MealPlan.decodePlan(MealPlan.encodePlan(plan)), plan)
+        XCTAssertEqual(MealPlan.upcoming(plan, today: 19), [plan[0]])
+        XCTAssertEqual(MealPlan.shopping(dishes, isOk: { $0 == 1 || $0 == 4 }), [2, 3])
+        XCTAssertEqual(MealPlan.nextId(dishes), 3)
+        XCTAssertTrue(MealPlan.decodeDishes("bad\nx\ty").isEmpty)
+    }
 }
