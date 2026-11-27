@@ -43,6 +43,9 @@ struct WeekAgendaView: View {
         Section(header: Text("🍲  Meals this week")) {
             if planned.isEmpty {
                 Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
+            } else if store.showMealCount {
+                let total = MealPlan.mealsCovered(planned, store.dishes)
+                Text("🍽  \(total) \(total == 1 ? "meal" : "meals") from \(planned.count) \(planned.count == 1 ? "cooking" : "cookings")")
             }
             ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
                 if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
@@ -51,7 +54,7 @@ struct WeekAgendaView: View {
                         ItemImage(name: dish.name, photoFile: dish.photo, category: "", size: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(dish.name).fontWeight(.medium)
-                            Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
+                            Text(mealDay(meal.day) + (store.showMealCount && dish.meals > 1 ? " · \(dish.meals) meals" : "") + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
                                 .font(.caption).foregroundColor(.secondary)
                         }
                         Spacer()
@@ -273,6 +276,7 @@ private struct DishEditor: View {
     @State private var originalPhoto = ""
     @State private var chosen: [Int64] = []
     @State private var optional: [Int64] = []
+    @State private var meals = 1
     @State private var query = ""
     @State private var loaded = false
 
@@ -324,6 +328,14 @@ private struct DishEditor: View {
                         })
                     }
                     TextField("Dish, e.g. Egg curry", text: $name)
+                    if store.showMealCount {
+                        Stepper(value: $meals, in: 1...20) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Cook once, eat \(meals) \(meals == 1 ? "time" : "times")").fontWeight(.medium)
+                                Text("How many meals one cooking gives").font(.caption).foregroundColor(.secondary)
+                            }
+                        }
+                    }
                 }
                 if !toBuy.isEmpty {
                     Section(header: Text("🛒  To buy · goes on your shopping list")) { ForEach(toBuy) { row($0) } }
@@ -365,7 +377,7 @@ private struct DishEditor: View {
             .safeAreaInset(edge: .bottom) {
                 Button {
                     if !originalPhoto.isEmpty && photo != originalPhoto { PhotoStore.delete(originalPhoto) }
-                    let id = store.saveDish(dishId, name: name, ingredients: chosen, optional: optional, photo: photo)
+                    let id = store.saveDish(dishId, name: name, ingredients: chosen, optional: optional, photo: photo, meals: meals)
                     if existing == nil { store.planMeal(id, day: 0, today: today) }
                     done()
                 } label: {
@@ -377,7 +389,7 @@ private struct DishEditor: View {
                 .background(.bar)
             }
             .onAppear {
-                if !loaded, let d = existing { name = d.name; photo = d.photo; originalPhoto = d.photo; chosen = d.ingredients; optional = d.optional }
+                if !loaded, let d = existing { name = d.name; photo = d.photo; originalPhoto = d.photo; chosen = d.ingredients; optional = d.optional; meals = d.meals }
                 loaded = true
             }
         }
