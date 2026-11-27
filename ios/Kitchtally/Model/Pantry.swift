@@ -1002,7 +1002,9 @@ enum MealPlan {
 
     /// Meals you get from everything planned: each cooking gives the dish's number of meals.
     static func mealsCovered(_ planned: [PlannedMeal], _ dishes: [Dish]) -> Int {
-        planned.reduce(0) { $0 + (dishes.first(where: { d in d.id == $1.dishId })?.meals ?? 0) }
+        var total = 0
+        for m in planned { total += dishes.first(where: { $0.id == m.dishId })?.meals ?? 0 }
+        return total
     }
 
     static func nextId(_ dishes: [Dish]) -> Int64 { (dishes.map(\.id).max() ?? 0) + 1 }
