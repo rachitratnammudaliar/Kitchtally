@@ -22,6 +22,9 @@ struct WeekAgendaView: View {
             let by = WeekPlan.shortBy(plan, id, step: item.step, stock: store.stock(id))
             return by > 0 ? (item, by) : nil
         }.sorted { $0.0.name.lowercased() < $1.0.name.lowercased() }
+        let week = Pantry.week(Pantry.weekStart(today, first: store.weekStartDay, anchor: store.weekAnchor), store.entriesByItem, categoryOf: { id in store.item(id)?.category ?? "" }, isLong: { store.isLong($0) })
+        let estimate = short.reduce(Int64(0)) { $0 + WeeklyBudget.estimateMinor(unitPrice: Recipes.unitPriceMinor(store.entries($1.0.id)), shortBy: $1.1) }
+        let unpriced = short.filter { Recipes.unitPriceMinor(store.entries($0.0.id)) == nil }.count
         let toAdd = short.filter { !store.onShoppingList($0.0, today) }
         NavigationStack {
             List {
@@ -45,6 +48,21 @@ struct WeekAgendaView: View {
                                     Button("Add to shop") { store.setRefillNeeded(item.id, true) }.buttonStyle(.borderless)
                                 }
                             }
+                        }
+                        Text("Estimated cost: \(Money.format(estimate, store.currency))" + (unpriced > 0 ? " (+ \(unpriced) without a price yet)" : ""))
+                            .fontWeight(.medium)
+                        if store.weeklyBudgetMinor > 0 {
+                            let left = store.weeklyBudgetMinor - week.spentMinor - estimate
+                            Text(left >= 0 ? "Fits your \(Money.format(store.weeklyBudgetMinor, store.currency)) weekly budget, \(Money.format(left, store.currency)) to spare."
+                                 : "\(Money.format(-left, store.currency)) over your \(Money.format(store.weeklyBudgetMinor, store.currency)) weekly budget. Drop something or plan cheaper.")
+                                .font(.caption).foregroundColor(left >= 0 ? .secondary : .red)
+                        }
+                        if store.budgetMinor > 0 {
+                            let month = Pantry.spentBetween(store.entriesByItem.filter { !store.isLong($0.key) }, today.firstOfMonth, today)
+                            let mLeft = store.budgetMinor - month - estimate
+                            Text(mLeft >= 0 ? "Month: \(Money.format(month, store.currency)) spent + this plan leaves \(Money.format(mLeft, store.currency)) of \(Money.format(store.budgetMinor, store.currency))."
+                                 : "Month: this plan takes you \(Money.format(-mLeft, store.currency)) over \(Money.format(store.budgetMinor, store.currency)).")
+                                .font(.caption).foregroundColor(mLeft >= 0 ? .secondary : .red)
                         }
                         if toAdd.count > 1 {
                             Button("Add all \(toAdd.count) to shopping list") {

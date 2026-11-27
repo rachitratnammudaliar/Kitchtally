@@ -442,6 +442,15 @@ struct WeekView: View {
                                     .font(.caption).foregroundColor(.secondary)
                             }
                         }
+                        if store.weeklyBudgetMinor > 0 {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("This week: \(Money.format(week.spentMinor, store.currency)) of \(Money.format(store.weeklyBudgetMinor, store.currency))").fontWeight(.medium)
+                                ProgressView(value: min(Double(week.spentMinor), Double(store.weeklyBudgetMinor)), total: Double(store.weeklyBudgetMinor))
+                                Text(week.spentMinor <= store.weeklyBudgetMinor ? "\(Money.format(store.weeklyBudgetMinor - week.spentMinor, store.currency)) left this week"
+                                     : "\(Money.format(week.spentMinor - store.weeklyBudgetMinor, store.currency)) over this week")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                        }
                         if store.budgetMinor > 0 {
                             let month = Pantry.spentBetween(byItem.filter { !store.isLong($0.key) }, today.firstOfMonth, today)
                             VStack(alignment: .leading, spacing: 6) {
@@ -512,6 +521,7 @@ struct SettingsView: View {
     @State private var exportURL: URL?
     @State private var message: String?
     @State private var budgetText = ""
+    @State private var weeklyText = ""
 
     var body: some View {
         NavigationStack {
@@ -539,6 +549,18 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Show spending on Weekly", isOn: $store.showSpending)
+                    HStack {
+                        TextField("Weekly budget (optional)", text: $weeklyText).keyboardType(.decimalPad)
+                        Button("Save") {
+                            store.weeklyBudgetMinor = weeklyText.trimmingCharacters(in: .whitespaces).isEmpty ? 0 : (Money.parseToMinor(weeklyText) ?? store.weeklyBudgetMinor)
+                            weeklyText = store.weeklyBudgetMinor > 0 ? Money.minorToInput(store.weeklyBudgetMinor) : ""
+                        }
+                        .disabled(!weeklyText.trimmingCharacters(in: .whitespaces).isEmpty && Money.parseToMinor(weeklyText) == nil)
+                    }
+                    if store.weeklyBudgetMinor > 0 {
+                        Text("About \(Money.format(WeeklyBudget.monthlyOf(store.weeklyBudgetMinor), store.currency)) a month. Long-lasting things (toothpaste, vitamins) are not counted.")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
                     HStack {
                         TextField("Monthly budget (optional)", text: $budgetText).keyboardType(.decimalPad)
                         Button("Save") {
@@ -630,6 +652,7 @@ struct SettingsView: View {
             .onAppear {
                 exportURL = try? store.exportFile()
                 budgetText = store.budgetMinor > 0 ? Money.minorToInput(store.budgetMinor) : ""
+                weeklyText = store.weeklyBudgetMinor > 0 ? Money.minorToInput(store.weeklyBudgetMinor) : ""
             }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.json, .plainText, .data]) { result in
                 switch result {

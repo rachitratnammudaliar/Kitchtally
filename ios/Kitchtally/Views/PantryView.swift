@@ -71,7 +71,7 @@ struct PantryView: View {
             .alert("What's new", isPresented: $showNew) {
                 Button("Got it") { store.markWhatsNewSeen() }
             } message: {
-                Text("📅 New Week agenda (button on the home page): pick what you'll use each day, and see what you need to buy for the week.\n\n📦 The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
+                Text("💶 Weekly and monthly budgets (Settings). Plan your week in the Week agenda and it tells you whether what you need to buy fits. Nothing nags you on the home page.\n\n📦 The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
             }
             .sheet(isPresented: $adding) { EditItemView(existing: nil) }
             .sheet(isPresented: $showSettings) { SettingsView() }

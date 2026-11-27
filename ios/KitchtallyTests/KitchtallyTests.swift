@@ -428,4 +428,11 @@ final class KitchtallyTests: XCTestCase {
         XCTAssertEqual(WeekPlan.shortBy(plan, 1, step: 1, stock: 5), 0, accuracy: 0.0001)
         XCTAssertEqual(Set(WeekPlan.upcoming(plan, today: 11).keys), [11, 12])
     }
+
+    func testWeeklyBudgetMonthlyAndEstimate() {
+        XCTAssertEqual(WeeklyBudget.monthlyOf(1500), 6500)
+        XCTAssertEqual(WeeklyBudget.monthlyOf(1000), 4333)
+        XCTAssertEqual(WeeklyBudget.estimateMinor(unitPrice: 54, shortBy: 2), 108)
+        XCTAssertEqual(WeeklyBudget.estimateMinor(unitPrice: nil, shortBy: 2), 0)
+    }
 }

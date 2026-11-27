@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.13.1
+- **Weekly and monthly budgets (iPhone):** same as Android 1.13.0. Set them in Settings → Spending (15 a week is about 65 a month). Plan your week in the Week agenda and it estimates what the missing items will cost and whether the plan fits the week and the month. Nothing about the budget shows on the home page. Long-lasting things are never counted.
+
 ## 1.13.0
 - **Weekly and monthly budgets (Android):** set them in Settings → Spending (15 a week is about 65 a month). They don't show on the home page. Plan your week in the Week agenda and it estimates what the missing items will cost at your last prices, and tells you whether the plan fits the week and the month. The Weekly tab shows spending against the budget under Show spending. Long-lasting things (toothpaste, vitamins) are never counted. iPhone follows next.
 
