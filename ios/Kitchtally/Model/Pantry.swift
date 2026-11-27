@@ -932,7 +932,14 @@ enum WeeklyBudget {
 struct Dish: Identifiable, Equatable {
     var id: Int64
     var name: String
+    /// Everything the dish uses.
     var ingredients: [Int64]
+    /// The ones that are nice to have: never counted as missing, never put on the shopping list.
+    var optional: [Int64] = []
+    /// File name of the dish photo in the app's private storage, or empty.
+    var photo: String = ""
+
+    var essentials: [Int64] { ingredients.filter { !optional.contains($0) } }
 }
 
 /// day = epoch day it's planned for, or 0 for "any day this week". until = last day it still counts.
@@ -951,7 +958,12 @@ enum MealPlan {
     }
 
     static func encodeDishes(_ dishes: [Dish]) -> String {
-        dishes.map { "\($0.id)\t\(clean($0.name))\t" + Array(NSOrderedSet(array: $0.ingredients)).compactMap { $0 as? Int64 }.map(String.init).joined(separator: ",") }.joined(separator: "\n")
+        dishes.map { d in
+            var seen: [Int64] = []
+            for i in d.ingredients where !seen.contains(i) { seen.append(i) }
+            let ing = seen.map { d.optional.contains($0) ? "\($0)*" : "\($0)" }.joined(separator: ",")
+            return "\(d.id)\t\(clean(d.name))\t\(ing)\t\(clean(d.photo))"
+        }.joined(separator: "\n")
     }
 
     static func decodeDishes(_ text: String) -> [Dish] {
@@ -961,8 +973,14 @@ enum MealPlan {
             let name = p[1].trimmingCharacters(in: .whitespaces)
             if name.isEmpty { return nil }
             var ing: [Int64] = []
-            for s in p[2].split(separator: ",") { if let v = Int64(s), !ing.contains(v) { ing.append(v) } }
-            return Dish(id: id, name: name, ingredients: ing)
+            var opt: [Int64] = []
+            for s in p[2].split(separator: ",") {
+                let star = s.hasSuffix("*")
+                guard let v = Int64(star ? String(s.dropLast()) : String(s)) else { continue }
+                if !ing.contains(v) { ing.append(v) }
+                if star && !opt.contains(v) { opt.append(v) }
+            }
+            return Dish(id: id, name: name, ingredients: ing, optional: opt, photo: p.count > 3 ? p[3].trimmingCharacters(in: .whitespaces) : "")
         }
     }
 
@@ -983,7 +1001,14 @@ enum MealPlan {
     static func nextId(_ dishes: [Dish]) -> Int64 { (dishes.map(\.id).max() ?? 0) + 1 }
 
     /// Ingredients that are out or running low.
-    static func missing(_ dish: Dish, isOk: (Int64) -> Bool) -> [Int64] { dish.ingredients.filter { !isOk($0) } }
+    static func missing(_ dish: Dish, isOk: (Int64) -> Bool) -> [Int64] { dish.essentials.filter { !isOk($0) } }
+
+    /// Dishes planned in the last two weeks that are over now, newest first: what "same as last week" offers.
+    static func lastWeek(_ plan: [PlannedMeal], today: Int) -> [Int64] {
+        var out: [Int64] = []
+        for m in plan.filter({ $0.until < today && $0.until >= today - 13 }).sorted(by: { $0.until > $1.until }) where !out.contains(m.dishId) { out.append(m.dishId) }
+        return out
+    }
 
     /// Everything to buy across the planned dishes; an item used in two dishes counts once.
     static func shopping(_ dishes: [Dish], isOk: (Int64) -> Bool) -> [Int64] {

@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.15.1
+- **A real dish catalogue (iPhone):** same as Android 1.15.0. Each dish has a photo, a name and its ingredients, each marked Needed or Optional. A new full-screen dish page groups ingredients as To buy, You have and Optional. Needed ingredients you're out of or low on go onto the shopping list by themselves, and "Same as last week" plans last week's dishes again. Backups now include dishes, planned meals and the week agenda.
+
 ## 1.15.0
 - **A real dish catalogue:** each dish has a photo, a name and its ingredients, and each ingredient is Needed or Optional. Only needed ingredients you're out of or low on count as missing. Optional ones never go on the shopping list.
 - **New full-screen dish page:** ingredients are grouped as "To buy", "You have" and "Optional". Search your items, or type a new ingredient and add it on the spot. The save button shows how many you need to buy.

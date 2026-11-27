@@ -116,7 +116,7 @@ enum Backup {
         var errorDescription: String? { "This file isn't a Kitchtally backup." }
     }
 
-    static func encode(_ items: [Item], _ events: [Event], notes: [ShoppingNote] = [], recipes: [Recipe] = [], includePhotos: Bool = false) -> Data {
+    static func encode(_ items: [Item], _ events: [Event], notes: [ShoppingNote] = [], recipes: [Recipe] = [], includePhotos: Bool = false, dishes: [Dish] = [], meals: [PlannedMeal] = [], weekPlan: [Int: [Int64]] = [:]) -> Data {
         let ids = Set(items.map(\.id))
         let itemsJson: [[String: Any]] = items.map { i in
             var o: [String: Any] = [
@@ -144,7 +144,10 @@ enum Backup {
             ["name": r.name, "mealsAlone": r.mealsAlone, "mealsShared": r.mealsShared, "plannedDay": r.plannedDay,
              "lines": r.lines.map { ["i": $0.itemId, "n": $0.needed, "a": $0.amount] as [String: Any] }]
         }
-        let root: [String: Any] = ["format": format, "version": 7, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson]
+        let dishesJson: [[String: Any]] = dishes.map { ["id": $0.id, "name": $0.name, "ingredients": $0.ingredients, "optional": $0.optional] }
+        let mealsJson: [[String: Any]] = meals.map { ["dish": $0.dishId, "day": $0.day, "until": $0.until] }
+        let root: [String: Any] = ["format": format, "version": 7, "items": itemsJson, "events": eventsJson, "shopping": notesJson, "recipes": recipesJson,
+                                   "dishes": dishesJson, "meals": mealsJson, "weekPlan": WeekPlan.encode(weekPlan)]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
     }
 
@@ -157,7 +160,7 @@ enum Backup {
         return n
     }
 
-    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event], notes: [ShoppingNote], recipes: [Recipe]) {
+    static func decode(_ data: Data, includePhotos: Bool = false) throws -> (items: [Item], events: [Event], notes: [ShoppingNote], recipes: [Recipe], dishes: [Dish], meals: [PlannedMeal], weekPlan: [Int: [Int64]]) {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               root["format"] as? String == format else { throw BackupError.notABackup }
         var items: [Item] = []
@@ -245,7 +248,21 @@ enum Backup {
                 plannedDay: number(o, "plannedDay")?.intValue ?? -1
             ))
         }
-        return (items, events, notes, recipes)
+        var dishes: [Dish] = []
+        for case let o as [String: Any] in root["dishes"] as? [Any] ?? [] {
+            let name = string(o, "name").trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { continue }
+            let ing = (o["ingredients"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.int64Value }
+            let opt = (o["optional"] as? [Any] ?? []).compactMap { ($0 as? NSNumber)?.int64Value }
+            dishes.append(Dish(id: number(o, "id")?.int64Value ?? Int64(dishes.count + 1), name: String(name.prefix(80)), ingredients: ing, optional: opt))
+        }
+        var meals: [PlannedMeal] = []
+        for case let o as [String: Any] in root["meals"] as? [Any] ?? [] {
+            if let d = number(o, "dish")?.int64Value, let day = number(o, "day")?.intValue, let until = number(o, "until")?.intValue {
+                meals.append(PlannedMeal(dishId: d, day: day, until: until))
+            }
+        }
+        return (items, events, notes, recipes, dishes, meals, WeekPlan.decode(string(root, "weekPlan")))
     }
 }
 
@@ -656,14 +673,23 @@ final class Store: ObservableObject {
 
     /// Creates a dish (id 0) or updates one. Returns its id.
     @discardableResult
-    func saveDish(_ id: Int64, name: String, ingredients: [Int64]) -> Int64 {
+    func saveDish(_ id: Int64, name: String, ingredients: [Int64], optional: [Int64] = [], photo: String = "") -> Int64 {
         let real = id == 0 ? MealPlan.nextId(dishes) : id
-        let dish = Dish(id: real, name: name.trimmingCharacters(in: .whitespaces), ingredients: ingredients)
+        let dish = Dish(id: real, name: name.trimmingCharacters(in: .whitespaces), ingredients: ingredients, optional: optional.filter { ingredients.contains($0) }, photo: photo)
         if let i = dishes.firstIndex(where: { $0.id == real }) { dishes[i] = dish } else { dishes.append(dish) }
         return real
     }
 
+    /// Whatever the planned meals need and you're out of or low on goes on the shopping list by itself.
+    func syncMealShopping(_ today: Day) {
+        let planned = MealPlan.upcoming(plannedMeals, today: today.epochDay).compactMap { m in dishes.first { $0.id == m.dishId } }
+        for id in MealPlan.shopping(planned, isOk: { ingredientOk($0, today) }) {
+            if let item = item(id), !onShoppingList(item, today) { setRefillNeeded(id, true) }
+        }
+    }
+
     func deleteDish(_ id: Int64) {
+        if let p = dishes.first(where: { $0.id == id })?.photo, !p.isEmpty { PhotoStore.delete(p) }
         dishes.removeAll { $0.id == id }
         plannedMeals.removeAll { $0.dishId == id }
     }
@@ -1011,7 +1037,7 @@ final class Store: ObservableObject {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("kitchtally-backup-\(f.string(from: Date())).json")
-        try Backup.encode(items, events, notes: notes, recipes: recipes).write(to: url, options: .atomic)
+        try Backup.encode(items, events, notes: notes, recipes: recipes, dishes: dishes, meals: plannedMeals, weekPlan: weekPlan).write(to: url, options: .atomic)
         UserDefaults.standard.set(Day.today().epochDay, forKey: "last_backup_day")
         return url
     }
@@ -1044,6 +1070,21 @@ final class Store: ObservableObject {
             nextRecipeId += 1
             copy.lines = r.lines.compactMap { l in newIds[l.itemId].map { RecipeLine(itemId: $0, needed: l.needed, amount: l.amount) } }
             recipes.append(copy)
+        }
+        // Dishes, planned meals and the week agenda point at items by id, so they follow the new ids.
+        var dishIds: [Int64: Int64] = [:]
+        for d in contents.dishes {
+            let id = MealPlan.nextId(dishes)
+            dishIds[d.id] = id
+            dishes.append(Dish(id: id, name: d.name, ingredients: d.ingredients.compactMap { newIds[$0] }, optional: d.optional.compactMap { newIds[$0] }))
+        }
+        plannedMeals += contents.meals.compactMap { m in dishIds[m.dishId].map { PlannedMeal(dishId: $0, day: m.day, until: m.until) } }
+        for (day, ids) in contents.weekPlan {
+            let mapped = ids.compactMap { newIds[$0] }
+            if mapped.isEmpty { continue }
+            var now = weekPlan[day] ?? []
+            for i in mapped where !now.contains(i) { now.append(i) }
+            weekPlan[day] = now
         }
         persist()
         return contents.items.count
