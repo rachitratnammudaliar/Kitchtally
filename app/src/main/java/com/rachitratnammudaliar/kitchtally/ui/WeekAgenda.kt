@@ -131,6 +131,17 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                                         color = if (left >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                                     )
                                 }
+                                val monthly by vm.budgetMinor.collectAsState()
+                                if (monthly > 0) {
+                                    val month = Pantry.spentBetween(state.entriesByItem.filterKeys { !state.isLong(it) }, today.withDayOfMonth(1), today)
+                                    val mLeft = monthly - month - estimate
+                                    Text(
+                                        if (mLeft >= 0) "Month: ${Money.format(month, currency)} spent + this plan leaves ${Money.format(mLeft, currency)} of ${Money.format(monthly, currency)}."
+                                        else "Month: this plan takes you ${Money.format(-mLeft, currency)} over ${Money.format(monthly, currency)}.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (mLeft >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                                    )
+                                }
                                 if (toAdd.size > 1) {
                                     Button(onClick = { toAdd.forEach { vm.setRefillNeeded(it.first, true) } }, modifier = Modifier.fillMaxWidth()) {
                                         Text("Add all ${toAdd.size} to shopping list")

@@ -335,11 +335,6 @@ final class Store: ObservableObject {
     /// "Shopping for next week" stays on until this day (the next week's first day), then switches itself off. 0 = off.
     @Published private(set) var forNextWeekUntil: Int
 
-    /// What you want to spend on the weekly shop (long-lasting things not counted). 0 = off.
-    @Published var weeklyBudgetMinor: Int64 = Int64(max(0, UserDefaults.standard.integer(forKey: "weekly_budget_minor"))) {
-        didSet { UserDefaults.standard.set(weeklyBudgetMinor, forKey: "weekly_budget_minor") }
-    }
-
     @Published var budgetMinor: Int64 {
         didSet { UserDefaults.standard.set(budgetMinor, forKey: "budget_minor") }
     }

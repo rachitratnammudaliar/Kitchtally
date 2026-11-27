@@ -465,7 +465,7 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("💶  Weekly budget: set it in Settings and watch it on the home page. The Week agenda now estimates the cost of what you need to buy.")
+                    Text("💶  Weekly and monthly budgets (Settings). Plan your week in the Week agenda and it tells you whether what you need to buy fits. Nothing nags you on the home page.")
                     Text("📋  The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
                 }
             },
@@ -562,8 +562,6 @@ private fun PantryList(
     val weekAnchor by vm.weekAnchorDay.collectAsStateWithLifecycle()
     val anchor = weekAnchor.takeIf { it > 0 }?.let { LocalDate.ofEpochDay(it) }
     val week = Pantry.week(Pantry.weekStart(today, DayOfWeek.of(weekFirst), anchor), state.entriesByItem, isLong = { state.isLong(it) }, categoryOf = { id -> state.item(id)?.category ?: "" })
-    val weeklyBudget by vm.weeklyBudgetMinor.collectAsStateWithLifecycle()
-    val currency by vm.currency.collectAsStateWithLifecycle()
     val toBuy = toBuyCount(state, today)
     val almostOut = state.items.count { !it.unsure && state.stock(it.id) > 0 && Pantry.status(state.entries(it.id), it.counting(), today) != StockStatus.OK }
 
@@ -610,17 +608,6 @@ private fun PantryList(
                         StatTile(week.itemsUsed.toString(), "items used", Modifier.weight(1f)) { onTab("week") }
                         StatTile(week.itemsBought.toString(), "bought new", Modifier.weight(1f)) { onTab("week") }
                         StatTile((toBuy + state.notes.size).toString(), "to buy", Modifier.weight(1f)) { onTab("shopping") }
-                    }
-                    if (weeklyBudget > 0) {
-                        val spentNow = week.spentMinor
-                        Spacer(Modifier.height(12.dp))
-                        Text(
-                            if (spentNow <= weeklyBudget) "💶  ${Money.format(spentNow, currency)} of ${Money.format(weeklyBudget, currency)} this week · ${Money.format(weeklyBudget - spentNow, currency)} left"
-                            else "💶  ${Money.format(spentNow, currency)} of ${Money.format(weeklyBudget, currency)} this week · ${Money.format(spentNow - weeklyBudget, currency)} over",
-                            color = on, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(progress = { (spentNow.toFloat() / weeklyBudget).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), gapSize = 0.dp, drawStopIndicator = {})
                     }
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = onAgenda, modifier = Modifier.fillMaxWidth()) { Text("📅  Week agenda") }
