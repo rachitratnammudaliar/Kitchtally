@@ -38,6 +38,57 @@ struct WeekAgendaView: View {
         return f.string(from: Day(epochDay: epoch).localDate) + (epoch == today.epochDay ? " · Today" : "")
     }
 
+    @ViewBuilder
+    private func mealsSection(planned: [PlannedMeal]) -> some View {
+        Section(header: Text("🍲  Meals this week")) {
+            if planned.isEmpty {
+                Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
+            }
+            ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
+                if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
+                    let missing = dish.essentials.filter { !store.ingredientOk($0, today) }.compactMap { store.item($0)?.name }
+                    HStack(spacing: 10) {
+                        ItemImage(name: dish.name, photoFile: dish.photo, category: "", size: 40)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(dish.name).fontWeight(.medium)
+                            Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
+                                .font(.caption).foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Remove") { store.plannedMeals.removeAll { $0 == meal } }.buttonStyle(.borderless)
+                    }
+                }
+            }
+            Button("＋ Meal") { pickingMeal = true }
+        }
+    }
+
+    @ViewBuilder
+    private func daysSections(plan: [Int: [Int64]]) -> some View {
+        ForEach(0..<7, id: \.self) { offset in
+            let epoch = today.epochDay + offset
+            let ids = plan[epoch] ?? []
+            Section {
+                if ids.isEmpty {
+                    Text("Nothing planned").font(.caption).foregroundColor(.secondary)
+                }
+                ForEach(ids, id: \.self) { id in
+                    if let item = store.item(id) {
+                        HStack {
+                            Text(item.name)
+                            Spacer()
+                            Button { store.planToggle(epoch, id) } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
+                                .buttonStyle(.borderless).accessibilityLabel("Remove \(item.name)")
+                        }
+                    }
+                }
+                Button("＋ Add") { picking = epoch }
+            } header: {
+                Text(title(epoch))
+            }
+        }
+    }
+
     var body: some View {
         let plan = self.plan
         let planned = MealPlan.upcoming(store.plannedMeals, today: today.epochDay)
@@ -92,49 +143,8 @@ struct WeekAgendaView: View {
                         }
                     }
                 }
-                Section(header: Text("🍲  Meals this week")) {
-                    if planned.isEmpty {
-                        Text("No meals planned. Add the dishes you'll cook and what each needs.").foregroundColor(.secondary)
-                    }
-                    ForEach(planned.sorted { ($0.day > 0 ? $0.day : Int.max, $0.until) < ($1.day > 0 ? $1.day : Int.max, $1.until) }) { meal in
-                        if let dish = store.dishes.first(where: { $0.id == meal.dishId }) {
-                            let missing = dish.essentials.filter { !store.ingredientOk($0, today) }.compactMap { store.item($0)?.name }
-                            HStack(spacing: 10) {
-                                ItemImage(name: dish.name, photoFile: dish.photo, category: "", size: 40)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(dish.name).fontWeight(.medium)
-                                    Text(mealDay(meal.day) + " · " + (missing.isEmpty ? "✅ you have everything" : "Missing: " + missing.joined(separator: ", ")))
-                                        .font(.caption).foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                Button("Remove") { store.plannedMeals.removeAll { $0 == meal } }.buttonStyle(.borderless)
-                            }
-                        }
-                    }
-                    Button("＋ Meal") { pickingMeal = true }
-                }
-                ForEach(0..<7, id: \.self) { offset in
-                    let epoch = today.epochDay + offset
-                    let ids = plan[epoch] ?? []
-                    Section {
-                        if ids.isEmpty {
-                            Text("Nothing planned").font(.caption).foregroundColor(.secondary)
-                        }
-                        ForEach(ids, id: \.self) { id in
-                            if let item = store.item(id) {
-                                HStack {
-                                    Text(item.name)
-                                    Spacer()
-                                    Button { store.planToggle(epoch, id) } label: { Image(systemName: "xmark.circle.fill").foregroundColor(.secondary) }
-                                        .buttonStyle(.borderless).accessibilityLabel("Remove \(item.name)")
-                                }
-                            }
-                        }
-                        Button("＋ Add") { picking = epoch }
-                    } header: {
-                        Text(title(epoch))
-                    }
-                }
+                mealsSection(planned: planned)
+                daysSections(plan: plan)
             }
             .onAppear { store.syncMealShopping(today) }
             .onChange(of: store.plannedMeals) { _ in store.syncMealShopping(today) }
