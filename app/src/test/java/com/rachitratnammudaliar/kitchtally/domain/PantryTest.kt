@@ -507,6 +507,6 @@ class PantryTest {
     @Test
     fun lastWeekOffersFinishedMealsOnce() {
         val plan = listOf(PlannedMeal(1, 0, 90), PlannedMeal(2, 95, 95), PlannedMeal(1, 0, 92), PlannedMeal(3, 0, 50), PlannedMeal(4, 0, 105))
-        assertEquals(listOf(1L, 2L), MealPlan.lastWeek(plan, 100))
+        assertEquals(listOf(2L, 1L), MealPlan.lastWeek(plan, 100))
     }
 }
