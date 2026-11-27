@@ -480,4 +480,17 @@ class PantryTest {
         assertEquals(0L, WeeklyBudget.estimateMinor(null, 2.0))
         assertEquals(0L, WeeklyBudget.estimateMinor(54.0, 0.0))
     }
+
+    @Test
+    fun mealsRoundTripAndShopping() {
+        val dishes = listOf(Dish(1, "Egg curry", listOf(1, 2, 3)), Dish(2, "Aloo sabji", listOf(3, 4)))
+        assertEquals(dishes, Meals.decodeDishes(Meals.encodeDishes(dishes)))
+        val plan = listOf(PlannedMeal(1, 0, 20), PlannedMeal(2, 18, 18))
+        assertEquals(plan, Meals.decodePlan(Meals.encodePlan(plan)))
+        assertEquals(listOf(PlannedMeal(1, 0, 20)), Meals.upcoming(plan, 19))
+        // items 2 and 3 are out: 3 is in both dishes but counts once
+        assertEquals(listOf(2L, 3L), Meals.shopping(dishes) { it == 1L || it == 4L })
+        assertEquals(3L, Meals.nextId(dishes))
+        assertTrue(Meals.decodeDishes("bad\nx\ty").isEmpty())
+    }
 }

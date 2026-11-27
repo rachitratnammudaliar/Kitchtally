@@ -42,3 +42,46 @@ object WeeklyBudget {
     fun estimateMinor(unitPriceMinor: Double?, shortBy: Double): Long =
         if (unitPriceMinor == null || shortBy <= 0) 0L else Math.round(unitPriceMinor * shortBy)
 }
+
+/** A dish you cook (name + the items it needs) and a dish planned for this week. */
+data class Dish(val id: Long, val name: String, val ingredients: List<Long>)
+
+/** day = epoch day it's planned for, or 0 for "any day this week". until = last day it still counts. */
+data class PlannedMeal(val dishId: Long, val day: Long, val until: Long)
+
+object Meals {
+    private fun clean(s: String) = s.replace(Regex("[\\t\\n\\r;:]"), " ").trim()
+
+    fun encodeDishes(dishes: List<Dish>): String =
+        dishes.joinToString("\n") { "${it.id}\t${clean(it.name)}\t${it.ingredients.distinct().joinToString(",")}" }
+
+    fun decodeDishes(text: String): List<Dish> = text.split('\n').mapNotNull { line ->
+        val p = line.split('\t')
+        if (p.size < 3) return@mapNotNull null
+        val id = p[0].toLongOrNull() ?: return@mapNotNull null
+        val name = p[1].trim()
+        if (name.isBlank()) return@mapNotNull null
+        Dish(id, name, p[2].split(',').mapNotNull { it.toLongOrNull() }.distinct())
+    }
+
+    fun encodePlan(plan: List<PlannedMeal>): String = plan.joinToString(";") { "${it.dishId}:${it.day}:${it.until}" }
+
+    fun decodePlan(text: String): List<PlannedMeal> = text.split(';').mapNotNull { part ->
+        val p = part.split(':')
+        if (p.size < 3) return@mapNotNull null
+        val dish = p[0].toLongOrNull() ?: return@mapNotNull null
+        val day = p[1].toLongOrNull() ?: return@mapNotNull null
+        val until = p[2].toLongOrNull() ?: return@mapNotNull null
+        PlannedMeal(dish, day, until)
+    }
+
+    fun upcoming(plan: List<PlannedMeal>, today: Long): List<PlannedMeal> = plan.filter { it.until >= today }
+
+    fun nextId(dishes: List<Dish>): Long = (dishes.maxOfOrNull { it.id } ?: 0L) + 1
+
+    /** Ingredients that are out or running low. */
+    fun missing(dish: Dish, isOk: (Long) -> Boolean): List<Long> = dish.ingredients.filter { !isOk(it) }
+
+    /** Everything to buy across the planned dishes; an item used in two dishes counts once. */
+    fun shopping(dishes: List<Dish>, isOk: (Long) -> Boolean): List<Long> = dishes.flatMap { missing(it, isOk) }.distinct()
+}

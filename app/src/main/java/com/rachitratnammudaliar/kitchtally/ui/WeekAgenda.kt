@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.data.unitValue
+import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Recipes
@@ -60,22 +61,32 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
     val plan = WeekPlan.upcoming(planAll, today.toEpochDay())
     var picking by rememberSaveable { mutableStateOf<Long?>(null) }
     val days = (0L..6L).map { today.plusDays(it) }
+    val dishes by vm.dishes.collectAsState()
+    val plannedAll by vm.plannedMeals.collectAsState()
+    val planned = Meals.upcoming(plannedAll, today.toEpochDay())
+    var pickingMeal by rememberSaveable { mutableStateOf(false) }
+    var editingDish by rememberSaveable { mutableStateOf<Long?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Week agenda", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
-                actions = { if (plan.isNotEmpty()) TextButton(onClick = { vm.planClear() }) { Text("Clear") } },
+                actions = { if (plan.isNotEmpty() || planned.isNotEmpty()) TextButton(onClick = { vm.planClear() }) { Text("Clear") } },
             )
         },
     ) { padding ->
         if (state == null) return@Scaffold
-        val short = plan.values.flatten().distinct().mapNotNull { id ->
+        val dayShort = plan.values.flatten().distinct().mapNotNull { id ->
             val item = state.item(id) ?: return@mapNotNull null
             val by = WeekPlan.shortBy(plan, id, item.step, state.stock(id))
             if (by > 0) item to by else null
-        }.sortedBy { it.first.name.lowercase() }
+        }
+        val mealShort = Meals.shopping(planned.mapNotNull { m -> dishes.firstOrNull { it.id == m.dishId } }) { ingredientOk(state, it, today) }
+            .mapNotNull { id -> state.item(id)?.let { it to it.step.coerceAtLeast(0.001) } }
+        val short = (dayShort + mealShort).groupBy { it.first.id }
+            .map { (_, l) -> l.first().first to l.maxOf { it.second } }
+            .sortedBy { it.first.name.lowercase() }
         val currency by vm.currency.collectAsState()
         val weeklyBudget by vm.weeklyBudgetMinor.collectAsState()
         val weekFirst by vm.weekStartDay.collectAsState()
@@ -93,7 +104,7 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
         ) {
             item(key = "intro") {
                 Text(
-                    "Tap Add on a day to pick what you'll use. Below, you'll see what to buy.",
+                    "Add the meals you'll cook and what each needs, or plan single items by day. The top card shows what to buy.",
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -102,7 +113,7 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("🛒  To buy for this plan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         when {
-                            plan.isEmpty() -> Text("Nothing planned yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            plan.isEmpty() && planned.isEmpty() -> Text("Nothing planned yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             short.isEmpty() -> Text("✅  You have enough for everything planned.")
                             else -> {
                                 short.forEach { (item, by) ->
@@ -110,7 +121,8 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                                         Column(Modifier.weight(1f)) {
                                             Text(item.name)
                                             Text(
-                                                "Short by ${item.unitValue().label(by)} · planned ${WeekPlan.times(plan, item.id)}×, have ${item.unitValue().label(state.stock(item.id))}",
+                                                if (WeekPlan.times(plan, item.id) == 0) "Needed for your meals · have ${item.unitValue().label(state.stock(item.id))}"
+                                                else "Short by ${item.unitValue().label(by)} · planned ${WeekPlan.times(plan, item.id)}×, have ${item.unitValue().label(state.stock(item.id))}",
                                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
@@ -152,6 +164,7 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                     }
                 }
             }
+            item(key = "meals") { MealsCard(vm, state, today, planned, dishes, onAdd = { pickingMeal = true }) }
             items(days, key = { it.toEpochDay() }) { day ->
                 val ids = plan[day.toEpochDay()].orEmpty()
                 Card(Modifier.fillMaxWidth()) {
@@ -178,6 +191,13 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
                     }
                 }
             }
+        }
+
+        if (pickingMeal) {
+            DishPickerDialog(vm, today, dishes, onEdit = { editingDish = it }, onDismiss = { pickingMeal = false })
+        }
+        editingDish?.let { id ->
+            DishEditorDialog(vm, state, today, dishes, id, onDone = { editingDish = null; pickingMeal = false })
         }
 
         picking?.let { dayEpoch ->

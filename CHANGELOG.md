@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.14.0
+- **Meals:** in the Week agenda, tap ＋ Meal, name a dish (egg curry, aloo sabji) and tick what it needs from your items, in stock or not. Missing items can be added on the spot. The agenda shows what each meal is missing and builds the shopping list from all your meals, with the estimated cost against your weekly and monthly budgets.
+- Dishes are saved, so next week you pick "Egg curry" and its ingredients come back. Edit or delete a dish any time. The day-by-day item planner is still there. Android first, iPhone follows.
+
 ## 1.13.1
 - **Weekly and monthly budgets (iPhone):** same as Android 1.13.0. Set them in Settings → Spending (15 a week is about 65 a month). Plan your week in the Week agenda and it estimates what the missing items will cost and whether the plan fits the week and the month. Nothing about the budget shows on the home page. Long-lasting things are never counted.
 

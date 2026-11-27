@@ -177,6 +177,14 @@ class Prefs(context: Context) {
         get() = prefs.getBoolean("cooking_on", false)
         set(value) = prefs.edit().putBoolean("cooking_on", value).apply()
 
+    /** Saved dishes (see Meals) and the ones planned for this week. */
+    var dishesText: String
+        get() = prefs.getString("dishes", "") ?: ""
+        set(value) = prefs.edit().putString("dishes", value).apply()
+    var plannedMealsText: String
+        get() = prefs.getString("planned_meals", "") ?: ""
+        set(value) = prefs.edit().putString("planned_meals", value).apply()
+
     /** The week agenda, e.g. "20600:3,5;20601:2". See WeekPlan. */
     var weekPlan: String
         get() = prefs.getString("week_plan", "") ?: ""

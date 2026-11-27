@@ -465,7 +465,7 @@ private fun PantryList(
             title = { Text("What's new") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("💶  Weekly and monthly budgets (Settings). Plan your week in the Week agenda and it tells you whether what you need to buy fits. Nothing nags you on the home page.")
+                    Text("🍲  Plan meals in the Week agenda: name the dish, tick what it needs, and the shopping list builds itself. Saved dishes come back next week.")
                     Text("📋  The home page lists what you have, with filter chips. Add best-before dates and get a reminder 2 days before.")
                 }
             },
