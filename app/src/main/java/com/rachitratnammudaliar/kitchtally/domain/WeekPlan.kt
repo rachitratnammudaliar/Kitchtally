@@ -49,7 +49,7 @@ data class Dish(val id: Long, val name: String, val ingredients: List<Long>)
 /** day = epoch day it's planned for, or 0 for "any day this week". until = last day it still counts. */
 data class PlannedMeal(val dishId: Long, val day: Long, val until: Long)
 
-object Meals {
+object MealPlan {
     private fun clean(s: String) = s.replace(Regex("[\\t\\n\\r;:]"), " ").trim()
 
     fun encodeDishes(dishes: List<Dish>): String =

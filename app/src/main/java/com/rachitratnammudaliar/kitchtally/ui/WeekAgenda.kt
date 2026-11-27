@@ -41,7 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.rachitratnammudaliar.kitchtally.data.unitValue
-import com.rachitratnammudaliar.kitchtally.domain.Meals
+import com.rachitratnammudaliar.kitchtally.domain.MealPlan
 import com.rachitratnammudaliar.kitchtally.domain.Money
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Recipes
@@ -63,7 +63,7 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
     val days = (0L..6L).map { today.plusDays(it) }
     val dishes by vm.dishes.collectAsState()
     val plannedAll by vm.plannedMeals.collectAsState()
-    val planned = Meals.upcoming(plannedAll, today.toEpochDay())
+    val planned = MealPlan.upcoming(plannedAll, today.toEpochDay())
     var pickingMeal by rememberSaveable { mutableStateOf(false) }
     var editingDish by rememberSaveable { mutableStateOf<Long?>(null) }
 
@@ -82,7 +82,7 @@ fun WeekAgendaScreen(vm: PantryViewModel, state: PantryState?, today: LocalDate,
             val by = WeekPlan.shortBy(plan, id, item.step, state.stock(id))
             if (by > 0) item to by else null
         }
-        val mealShort = Meals.shopping(planned.mapNotNull { m -> dishes.firstOrNull { it.id == m.dishId } }) { ingredientOk(state, it, today) }
+        val mealShort = MealPlan.shopping(planned.mapNotNull { m -> dishes.firstOrNull { it.id == m.dishId } }) { ingredientOk(state, it, today) }
             .mapNotNull { id -> state.item(id)?.let { it to it.step.coerceAtLeast(0.001) } }
         val short = (dayShort + mealShort).groupBy { it.first.id }
             .map { (_, l) -> l.first().first to l.maxOf { it.second } }

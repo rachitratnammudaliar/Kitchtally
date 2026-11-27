@@ -24,6 +24,7 @@ import com.rachitratnammudaliar.kitchtally.data.toEntry
 import com.rachitratnammudaliar.kitchtally.data.typeValue
 import com.rachitratnammudaliar.kitchtally.domain.Entry
 import com.rachitratnammudaliar.kitchtally.domain.Dish
+import com.rachitratnammudaliar.kitchtally.domain.MealPlan
 import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.PlannedMeal
 import com.rachitratnammudaliar.kitchtally.domain.WeekPlan
@@ -32,7 +33,6 @@ import com.rachitratnammudaliar.kitchtally.widget.ShoppingWidget
 import com.rachitratnammudaliar.kitchtally.domain.EventType
 import com.rachitratnammudaliar.kitchtally.domain.Categories
 import com.rachitratnammudaliar.kitchtally.domain.Life
-import com.rachitratnammudaliar.kitchtally.domain.Meals
 import com.rachitratnammudaliar.kitchtally.domain.Pantry
 import com.rachitratnammudaliar.kitchtally.domain.Qty
 import com.rachitratnammudaliar.kitchtally.domain.Suggestions
@@ -99,40 +99,40 @@ class PantryViewModel(app: Application) : AndroidViewModel(app) {
         _weekPlan.value = next
     }
 
-    private val _dishes = MutableStateFlow(Meals.decodeDishes(prefs.dishesText))
+    private val _dishes = MutableStateFlow(MealPlan.decodeDishes(prefs.dishesText))
     val dishes: StateFlow<List<Dish>> = _dishes.asStateFlow()
-    private val _plannedMeals = MutableStateFlow(Meals.decodePlan(prefs.plannedMealsText))
+    private val _plannedMeals = MutableStateFlow(MealPlan.decodePlan(prefs.plannedMealsText))
     val plannedMeals: StateFlow<List<PlannedMeal>> = _plannedMeals.asStateFlow()
 
     /** Creates a dish (id 0) or updates one. Returns its id. */
     fun saveDish(id: Long, name: String, ingredients: List<Long>): Long {
-        val real = if (id == 0L) Meals.nextId(_dishes.value) else id
+        val real = if (id == 0L) MealPlan.nextId(_dishes.value) else id
         val dish = Dish(real, name.trim(), ingredients.distinct())
         val next = if (_dishes.value.any { it.id == real }) _dishes.value.map { if (it.id == real) dish else it } else _dishes.value + dish
-        prefs.dishesText = Meals.encodeDishes(next)
+        prefs.dishesText = MealPlan.encodeDishes(next)
         _dishes.value = next
         return real
     }
 
     fun deleteDish(id: Long) {
         val next = _dishes.value.filter { it.id != id }
-        prefs.dishesText = Meals.encodeDishes(next)
+        prefs.dishesText = MealPlan.encodeDishes(next)
         _dishes.value = next
         val plan = _plannedMeals.value.filter { it.dishId != id }
-        prefs.plannedMealsText = Meals.encodePlan(plan)
+        prefs.plannedMealsText = MealPlan.encodePlan(plan)
         _plannedMeals.value = plan
     }
 
     fun planMeal(dishId: Long, day: Long, today: LocalDate) {
         val until = if (day > 0) day else today.toEpochDay() + 6
         val plan = _plannedMeals.value + PlannedMeal(dishId, day, until)
-        prefs.plannedMealsText = Meals.encodePlan(plan)
+        prefs.plannedMealsText = MealPlan.encodePlan(plan)
         _plannedMeals.value = plan
     }
 
     fun unplanMeal(meal: PlannedMeal) {
         val plan = _plannedMeals.value - meal
-        prefs.plannedMealsText = Meals.encodePlan(plan)
+        prefs.plannedMealsText = MealPlan.encodePlan(plan)
         _plannedMeals.value = plan
     }
 
